@@ -1,0 +1,3787 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SVG Studio for VIBridge</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ImageTracerJS (自動トレース用ライブラリ) -->
+  <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+    
+    body {
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* 透過背景を表すチェッカーボード柄 */
+    .bg-checkerboard {
+      background-color: #ffffff;
+      background-image: 
+        linear-gradient(45deg, #f1f5f9 25%, transparent 25%), 
+        linear-gradient(-45deg, #f1f5f9 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #f1f5f9 75%), 
+        linear-gradient(-45deg, transparent 75%, #f1f5f9 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }
+
+    /* ズーム時のアニメーション */
+    #board-container {
+      transition: transform 0.2s ease-out;
+      transform-origin: center center;
+    }
+
+    /* スタイラス・タッチ操作時のスクロール防止 */
+    #drawing-svg {
+      touch-action: none;
+    }
+
+    /* 消しゴム・選択モード時のホバーハイライト */
+    .mode-eraser #main-group *,
+    .mode-recolor #main-group *,
+    .mode-select #main-group * {
+      filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.8));
+      opacity: 0.8;
+      cursor: pointer;
+    }
+
+    /* 選択中の要素のハイライト */
+    .selected-element {
+      filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.95)) !important;
+    }
+
+    /* Word風トリミングハンドル */
+    .crop-handle {
+      cursor: pointer;
+    }
+
+    /* カスタムスクロールバー */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen w-screen overflow-hidden flex flex-col">
+
+  <!-- ==================== 上部メインツールバー ==================== -->
+  <header class="bg-slate-800 border-b border-slate-700 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0 z-20 shadow-md">
+    <!-- アプリタイトル -->
+    <div class="flex items-center gap-2 mr-2">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow">
+        <i data-lucide="pen-tool" class="w-5 h-5 text-white"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-sm leading-tight tracking-wide text-white">SVG Studio</h1>
+        <p class="text-[10px] text-indigo-300 font-medium">for VIBridge</p>
+      </div>
+    </div>
+
+    <!-- 描画モード切り替え -->
+    <div class="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-700 gap-0.5 flex-wrap">
+      <button id="tool-pen" onclick="setTool('pen')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600 text-white shadow transition" title="フリーハンドペン">
+        <i data-lucide="pencil" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-bezier" onclick="setTool('bezier')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="ベジェ曲線ペン (Illustrator風: クリックで直線、ドラッグで曲線ハンドル、Enter/ダブルクリックで確定)">
+        <i data-lucide="pen-tool" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-node" onclick="setTool('node')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="アンカーポイント・カーブ編集 (パスをクリックして頂点や曲線ハンドルを調整)">
+        <i data-lucide="git-commit" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-fillpen" onclick="setTool('fillpen')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="閉じて塗る (輪郭を描くと自動で中を塗ります)">
+        <i data-lucide="lasso" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-rect" onclick="setTool('rect')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="四角形">
+        <i data-lucide="square" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-circle" onclick="setTool('circle')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="円">
+        <i data-lucide="circle" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-line" onclick="setTool('line')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="直線">
+        <i data-lucide="minus" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-bucket" onclick="setTool('bucket')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="バケツ塗りつぶし (閉じた領域をクリックして塗る)">
+        <i data-lucide="paint-bucket" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-recolor" onclick="setTool('recolor')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="要素の色を変更">
+        <i data-lucide="palette" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-select" onclick="setTool('select')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="選択・移動・拡大縮小 (Shift+クリックやドラッグで複数選択)">
+        <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-crop" onclick="setTool('crop')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="手動トリミング枠の調整 (Word風ハンドル操作)">
+        <i data-lucide="crop" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-eraser-partial" onclick="setTool('eraser-partial')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="部分消しゴム (なぞった部分を消去)">
+        <i data-lucide="eraser" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-eraser" onclick="setTool('eraser')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="パス単位で消去">
+        <i data-lucide="trash" class="w-4 h-4"></i>
+      </button>
+      <button id="tool-eyedropper" onclick="setTool('eyedropper')" class="tool-btn flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition" title="下絵から色を吸い取る">
+        <i data-lucide="pipette" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- カラー（線・塗り）・太さ・手ブレ補正・単純化 -->
+    <div class="flex flex-wrap items-center gap-2.5 bg-slate-900/70 px-3 py-1.5 rounded-xl border border-slate-700/80">
+      <!-- 線の色と塗りの色 -->
+      <div class="flex items-center gap-2">
+        <!-- 線の色 -->
+        <div class="flex items-center gap-1 bg-slate-800/90 px-2 py-0.5 rounded-lg border border-slate-700" title="線の色（選択中の図形にも即時反映）">
+          <label class="flex items-center gap-1 cursor-pointer text-[11px] text-slate-300">
+            <input type="checkbox" id="stroke-enabled" checked onchange="onStrokeFillChange()" class="accent-indigo-500 w-3 h-3 rounded">
+            <span>線</span>
+          </label>
+          <input type="color" id="color-picker" value="#000000" oninput="onStrokeFillChange()" class="w-5 h-5 rounded cursor-pointer bg-transparent border-0 p-0">
+        </div>
+
+        <!-- 中（塗り）の色 -->
+        <div class="flex items-center gap-1 bg-slate-800/90 px-2 py-0.5 rounded-lg border border-slate-700" title="図形の中の色（塗りつぶし有無と色）">
+          <label class="flex items-center gap-1 cursor-pointer text-[11px] text-slate-300">
+            <input type="checkbox" id="fill-enabled" onchange="onStrokeFillChange()" class="accent-indigo-500 w-3 h-3 rounded">
+            <span>塗</span>
+          </label>
+          <input type="color" id="fill-color-picker" value="#3b82f6" oninput="onFillColorPick()" class="w-5 h-5 rounded cursor-pointer bg-transparent border-0 p-0">
+        </div>
+
+        <!-- クイックカラーパレット -->
+        <div class="hidden xl:flex items-center gap-1">
+          <button onclick="setQuickColor('#000000')" class="w-4 h-4 rounded-full bg-black border border-slate-500 hover:scale-110 transition" title="黒 (#000000)"></button>
+          <button onclick="setQuickColor('#ef4444')" class="w-4 h-4 rounded-full bg-red-500 border border-slate-500 hover:scale-110 transition"></button>
+          <button onclick="setQuickColor('#3b82f6')" class="w-4 h-4 rounded-full bg-blue-500 border border-slate-500 hover:scale-110 transition"></button>
+          <button onclick="setQuickColor('#10b981')" class="w-4 h-4 rounded-full bg-emerald-500 border border-slate-500 hover:scale-110 transition"></button>
+          <button onclick="setQuickColor('#f59e0b')" class="w-4 h-4 rounded-full bg-amber-500 border border-slate-500 hover:scale-110 transition"></button>
+          <button onclick="setQuickColor('#ffffff')" class="w-4 h-4 rounded-full bg-white border border-slate-400 hover:scale-110 transition"></button>
+        </div>
+      </div>
+
+      <div class="h-4 w-px bg-slate-700"></div>
+
+      <!-- ペンの太さ -->
+      <div class="flex items-center gap-1.5">
+        <span class="text-xs text-slate-400">太さ</span>
+        <input type="range" id="stroke-width" min="1" max="40" value="5" class="w-16 accent-indigo-500 cursor-pointer">
+        <span id="stroke-width-val" class="text-xs font-mono w-5 text-right">5</span>
+      </div>
+
+      <div class="h-4 w-px bg-slate-700"></div>
+
+      <!-- 手ブレ補正 (Lazy Brush) -->
+      <div class="flex items-center gap-2" title="手ブレを吸収して滑らかな線にします">
+        <span class="text-xs text-slate-400">手ブレ補正</span>
+        <input type="range" id="stabilizer-slider" min="0" max="12" value="5" class="w-16 accent-indigo-500 cursor-pointer">
+        <span id="stabilizer-val" class="text-xs font-mono w-4 text-right">5</span>
+      </div>
+
+      <div class="h-4 w-px bg-slate-700 hidden md:block"></div>
+
+      <!-- パス単純化 (RDP) -->
+      <div class="hidden md:flex items-center gap-2" title="書き終わった線の頂点を間引いてデータ量を軽く・滑らかにします">
+        <span class="text-xs text-slate-400">曲線整形</span>
+        <input type="range" id="simplify-slider" min="0" max="8" step="0.5" value="1.5" class="w-16 accent-indigo-500 cursor-pointer">
+        <span id="simplify-val" class="text-xs font-mono w-5 text-right">1.5</span>
+      </div>
+    </div>
+
+    <!-- コピー / ペースト / Undo / Redo / Clear -->
+    <div class="flex items-center gap-1">
+      <button onclick="copySelectedElements()" id="btn-copy-sel" class="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition" title="選択要素をコピー (Ctrl+C)">
+        <i data-lucide="copy" class="w-4 h-4"></i>
+      </button>
+      <button onclick="pasteCopiedElements()" id="btn-paste-sel" class="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition" title="貼り付け (Ctrl+V)">
+        <i data-lucide="clipboard-paste" class="w-4 h-4"></i>
+      </button>
+      <button onclick="deleteSelectedElements()" id="btn-delete-sel" class="p-2 rounded-lg bg-slate-700 hover:bg-rose-600 disabled:opacity-40 transition mr-1" title="選択要素を削除 (Delete / Backspace)">
+        <i data-lucide="file-minus-2" class="w-4 h-4"></i>
+      </button>
+      <button onclick="undo()" id="btn-undo" class="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition" title="元に戻す (Ctrl+Z)">
+        <i data-lucide="undo-2" class="w-4 h-4"></i>
+      </button>
+      <button onclick="redo()" id="btn-redo" class="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition" title="やり直す (Ctrl+Y)">
+        <i data-lucide="redo-2" class="w-4 h-4"></i>
+      </button>
+      <button onclick="confirmClearAll()" class="p-2 rounded-lg bg-rose-900/60 hover:bg-rose-700 text-rose-200 transition ml-1" title="すべて消去">
+        <i data-lucide="trash-2" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== メインワークスペース ==================== -->
+  <div class="flex-1 flex overflow-hidden relative">
+    
+    <!-- 左サイドパネル: 下絵＆自動トレース設定 -->
+    <aside id="side-panel" class="w-72 bg-slate-800/95 border-r border-slate-700 flex flex-col justify-between overflow-y-auto shrink-0 z-10 transition-all duration-200">
+      <div class="p-4 space-y-5">
+        
+        <!-- 1. 下絵（トレース元画像）セクション -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+              <i data-lucide="image" class="w-4 h-4"></i>
+              1. 下絵の読み込み
+            </h2>
+            <button onclick="loadSampleImage()" class="text-[11px] text-indigo-300 hover:text-white underline">
+              サンプル読込
+            </button>
+          </div>
+
+          <label class="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-600 hover:border-indigo-500 rounded-xl cursor-pointer bg-slate-900/50 hover:bg-slate-900 transition group">
+            <div class="flex flex-col items-center justify-center pt-2 pb-2">
+              <i data-lucide="upload-cloud" class="w-6 h-6 text-slate-400 group-hover:text-indigo-400 mb-1 transition"></i>
+              <p class="text-xs text-slate-300 font-medium">画像を選択 または ドロップ</p>
+              <p class="text-[10px] text-slate-500">PNG, JPG, WebP, SVG</p>
+            </div>
+            <input id="file-upload" type="file" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
+          </label>
+
+          <!-- 下絵コントロール（画像読み込み後に有効化） -->
+          <div id="underlay-controls" class="space-y-2.5 bg-slate-900/60 p-3 rounded-xl border border-slate-700/70 opacity-50 pointer-events-none transition">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-300">下絵の表示</span>
+              <button id="btn-toggle-underlay" onclick="toggleUnderlay()" class="px-2.5 py-1 rounded bg-indigo-600 text-xs font-medium text-white">
+                表示中
+              </button>
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-400">下絵の不透明度</span>
+                <span id="opacity-val" class="font-mono text-slate-300">45%</span>
+              </div>
+              <input type="range" id="underlay-opacity" min="0" max="100" value="45" oninput="updateUnderlayOpacity(this.value)" class="w-full accent-indigo-500 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
+        <!-- 2. 自動トレース（オートベクター化）セクション -->
+        <div class="space-y-3">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            2. 自動トレース変換
+          </h2>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            読み込んだ下絵から輪郭や色面を自動抽出し、編集可能なSVGパスに変換します。
+          </p>
+
+          <div id="autotrace-controls" class="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-700/70 opacity-50 pointer-events-none transition">
+            <!-- トレースモード -->
+            <div class="space-y-1">
+              <label class="text-xs text-slate-400 block">トレース方式</label>
+              <select id="trace-mode" onchange="toggleTraceModeUI()" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500">
+                <option value="bw">白黒くっきり（線画・スケッチ向き）</option>
+                <option value="color">カラーイラスト・写真（多色面）</option>
+              </select>
+            </div>
+
+            <!-- 白黒モード用：しきい値（リアルタイムプレビュー対応） -->
+            <div id="bw-settings" class="space-y-1.5">
+              <div class="flex justify-between text-xs items-center">
+                <span class="text-slate-400">白黒のしきい値</span>
+                <span id="threshold-val" class="font-mono text-emerald-400 font-bold">150</span>
+              </div>
+              <input type="range" id="trace-threshold" min="10" max="245" value="150" oninput="onThresholdSlide(this.value)" class="w-full accent-emerald-500 cursor-pointer">
+              <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer pt-0.5">
+                <input type="checkbox" id="bw-live-preview" checked onchange="updateUnderlayDisplay()" class="accent-emerald-500 rounded w-3.5 h-3.5">
+                <span>キャンバス上で白黒プレビュー表示</span>
+              </label>
+            </div>
+
+            <!-- カラーモード用：色数 -->
+            <div id="color-settings" class="space-y-1 hidden">
+              <label class="text-xs text-slate-400 block">抽出する色数（高精細パレット）</label>
+              <select id="trace-colors" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-1.5 text-xs text-white">
+                <option value="4">4色（シンプル・アイコン向き）</option>
+                <option value="8">8色（標準イラスト）</option>
+                <option value="16" selected>16色（ディテール重視）</option>
+                <option value="24">24色（高彩度イラスト）</option>
+                <option value="32">32色（写真・グラデーション向き）</option>
+                <option value="48">48色（高精度カラー写真）</option>
+                <option value="64">64色（最高精細フルカラー）</option>
+              </select>
+            </div>
+
+            <!-- ノイズ除去（最小パスサイズ） -->
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-400">細かいゴミ除去</span>
+                <span id="speckle-val" class="font-mono text-slate-300">8</span>
+              </div>
+              <input type="range" id="trace-speckle" min="1" max="40" value="8" oninput="document.getElementById('speckle-val').textContent=this.value" class="w-full accent-emerald-500 cursor-pointer">
+            </div>
+
+            <!-- 背景の自動除外チェック -->
+            <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer pt-0.5">
+              <input type="checkbox" id="trace-remove-bg" checked class="accent-emerald-500 rounded w-3.5 h-3.5">
+              <span>背景のベタ塗りを自動で除外する</span>
+            </label>
+
+            <!-- 自動トレース実行ボタン -->
+            <button onclick="runAutoTrace()" id="btn-run-trace" class="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/40 transition">
+              <i data-lucide="wand-2" class="w-4 h-4"></i>
+              <span>下絵を自動トレース</span>
+            </button>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
+        <!-- 3. パス整理・一括調整ツール -->
+        <div class="space-y-2.5">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <i data-lucide="sliders" class="w-4 h-4"></i>
+            3. パスの一括クリーンアップ
+          </h2>
+          <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-700/70 space-y-2.5">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400">現在の要素数:</span>
+              <span id="path-count-badge" class="font-mono font-bold text-amber-400">0 個</span>
+            </div>
+
+            <!-- 均一の太さに補正 -->
+            <div class="pt-1 border-t border-slate-800 space-y-1.5">
+              <div class="flex items-center justify-between text-[11px] text-slate-300">
+                <span>均一な太さに揃える:</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" id="uniform-width-input" value="4" min="0.5" max="50" step="0.5" class="w-12 bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-center font-mono text-xs text-white">
+                  <span>px</span>
+                </div>
+              </div>
+              <button onclick="applyUniformStrokeWidth()" class="w-full py-1.5 px-2.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 border border-indigo-500/60 text-xs text-white font-medium flex items-center justify-center gap-1.5 transition" title="選択中の要素（未選択時はすべての線）を指定した均一な太さに補正します">
+                <i data-lucide="equal" class="w-3.5 h-3.5"></i>
+                <span id="btn-uniform-label">選択/全パスの太さを均一化</span>
+              </button>
+            </div>
+
+            <button onclick="removeSmallPaths()" class="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs text-slate-200 flex items-center justify-center gap-1.5 transition">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+              <span>微小なゴミパスを削除</span>
+            </button>
+            <button onclick="smoothAllPaths()" class="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs text-slate-200 flex items-center justify-center gap-1.5 transition" title="選択中またはすべてのパスを滑らかな曲線に再構築します">
+              <i data-lucide="activity" class="w-3.5 h-3.5 text-amber-400"></i>
+              <span>線を滑らかに補正</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- パネル下部ヒント -->
+      <div class="p-3 bg-slate-900/80 border-t border-slate-800 text-[11px] text-slate-400 space-y-1">
+        <div class="font-semibold text-slate-300 flex items-center gap-1">
+          <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-amber-400"></i>
+          使い方のコツ
+        </div>
+        <p>自動トレースした後に「パス消し」で不要な線を消し、「ペン」で描き足すと綺麗なイラストが素早く作れます。</p>
+      </div>
+    </aside>
+
+    <!-- サイドパネル開閉トグルボタン（モバイル/小画面用） -->
+    <button onclick="toggleSidebar()" class="absolute left-0 top-3 z-20 bg-slate-800 border border-l-0 border-slate-600 p-1.5 rounded-r-lg text-slate-300 hover:text-white shadow-md" title="パネルを開閉">
+      <i data-lucide="panel-left" class="w-4 h-4"></i>
+    </button>
+
+    <!-- ==================== 中央キャンバス領域 ==================== -->
+    <main id="canvas-workspace" class="flex-1 bg-slate-950 flex items-center justify-center p-4 overflow-auto relative">
+      
+      <!-- 描画ボード本体 (800 x 600 基準) -->
+      <div id="board-container" class="relative w-[800px] h-[600px] max-w-full max-h-full aspect-[4/3] shadow-2xl rounded-lg overflow-hidden bg-checkerboard border-2 border-slate-700 select-none" style="transform: scale(1);">
+        
+        <!-- 下絵用隠しCanvas（スポイト＆自動トレース解析用） -->
+        <canvas id="underlay-canvas" width="800" height="600" class="absolute inset-0 w-full h-full pointer-events-none opacity-45 hidden"></canvas>
+
+        <!-- メインSVGレイヤー -->
+        <svg id="drawing-svg" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full cursor-crosshair">
+          <defs>
+            <!-- 部分消しゴム用マスク定義 -->
+            <mask id="partial-eraser-mask">
+              <!-- マスク背景：白(100%表示) キャンバスを大きく超えてカバーさせる -->
+              <rect x="-2000" y="-2000" width="5000" height="5000" fill="white"></rect>
+              <!-- 消しゴムでなぞった黒い軌跡(0%透過) -->
+              <g id="eraser-strokes-group" stroke="black" fill="none" stroke-linecap="round" stroke-linejoin="round"></g>
+            </mask>
+          </defs>
+
+          <!-- 書き出し対象となるメイングループ（マスク適用） -->
+          <g id="main-group" mask="url(#partial-eraser-mask)" stroke-linecap="round" stroke-linejoin="round"></g>
+          
+          <!-- 描画中のプレビュー＆手ブレ補正ガイドレイヤー（書き出し時は除外） -->
+          <g id="ui-overlay-group" pointer-events="none">
+            <!-- 手描きプレビュー -->
+            <path id="active-stroke-path" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+            <!-- 図形プレビュー -->
+            <rect id="preview-rect" fill="none" class="hidden"></rect>
+            <circle id="preview-circle" fill="none" class="hidden"></circle>
+            <line id="preview-line" fill="none" class="hidden"></line>
+            
+            <line id="lazy-string-line" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="3,3" class="hidden"></line>
+            <circle id="lazy-brush-Dot" r="4" fill="#6366f1" class="hidden"></circle>
+            <!-- 範囲ドラッグ選択ラッソ矩形 -->
+            <rect id="marquee-select-rect" fill="rgba(99, 102, 241, 0.12)" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,4" class="hidden"></rect>
+          </g>
+
+          <!-- 複数選択＆拡大縮小バウンディングボックスオーバーレイ（書き出し時は除外） -->
+          <g id="selection-transform-group" class="hidden">
+            <rect id="sel-bbox-rect" fill="transparent" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,4" style="cursor: move;"></rect>
+            <g id="sel-handles-layer">
+              <rect data-sel-handle="nw" class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: nwse-resize;"></rect>
+              <rect data-sel-handle="n"  class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: ns-resize;"></rect>
+              <rect data-sel-handle="ne" class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: nesw-resize;"></rect>
+              <rect data-sel-handle="e"  class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: ew-resize;"></rect>
+              <rect data-sel-handle="se" class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: nwse-resize;"></rect>
+              <rect data-sel-handle="s"  class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: ns-resize;"></rect>
+              <rect data-sel-handle="sw" class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: nesw-resize;"></rect>
+              <rect data-sel-handle="w"  class="sel-handle" width="12" height="12" fill="#ffffff" stroke="#4f46e5" stroke-width="2" rx="2" style="cursor: ew-resize;"></rect>
+            </g>
+          </g>
+
+          <!-- Illustrator風 ベジェ曲線＆ノード（頂点・ハンドル）編集オーバーレイ（書き出し時は除外） -->
+          <g id="bezier-editor-group" class="hidden">
+            <!-- 作成中のベジェパスプレビュー -->
+            <path id="bezier-wip-path" fill="none" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"></path>
+            <!-- 次のアンカーへのゴムバンドプレビュー -->
+            <path id="bezier-rubber-path" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,4" pointer-events="none"></path>
+            <!-- 方向線（ハンドル線）と制御点 -->
+            <g id="bezier-handles-layer"></g>
+          </g>
+
+          <!-- Word風 手動トリミングオーバーレイ（書き出し時は除外） -->
+          <g id="crop-overlay-group" class="hidden">
+            <!-- 外側の暗幕4枚 -->
+            <rect id="crop-shade-top" fill="rgba(15, 23, 42, 0.65)" pointer-events="none"></rect>
+            <rect id="crop-shade-bottom" fill="rgba(15, 23, 42, 0.65)" pointer-events="none"></rect>
+            <rect id="crop-shade-left" fill="rgba(15, 23, 42, 0.65)" pointer-events="none"></rect>
+            <rect id="crop-shade-right" fill="rgba(15, 23, 42, 0.65)" pointer-events="none"></rect>
+
+            <!-- トリミング枠本体（ドラッグで枠ごと移動可能） -->
+            <rect id="crop-box-rect" fill="transparent" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="5,5" style="cursor: move;"></rect>
+            <!-- 三分割ガイド線 -->
+            <path id="crop-grid-lines" stroke="rgba(255,255,255,0.4)" stroke-width="1" fill="none" pointer-events="none"></path>
+
+            <!-- Word風の黒い太枠ハンドル（8箇所） -->
+            <g id="crop-handles-layer">
+              <!-- 四隅のL字ハンドルと辺の中央ハンドル（当たり判定用透明Rect＋見た目Path） -->
+              <rect data-handle="nw" class="crop-handle" width="24" height="24" fill="transparent" style="cursor: nwse-resize;"></rect>
+              <rect data-handle="ne" class="crop-handle" width="24" height="24" fill="transparent" style="cursor: nesw-resize;"></rect>
+              <rect data-handle="sw" class="crop-handle" width="24" height="24" fill="transparent" style="cursor: nesw-resize;"></rect>
+              <rect data-handle="se" class="crop-handle" width="24" height="24" fill="transparent" style="cursor: nwse-resize;"></rect>
+              <rect data-handle="n" class="crop-handle" width="32" height="18" fill="transparent" style="cursor: ns-resize;"></rect>
+              <rect data-handle="s" class="crop-handle" width="32" height="18" fill="transparent" style="cursor: ns-resize;"></rect>
+              <rect data-handle="w" class="crop-handle" width="18" height="32" fill="transparent" style="cursor: ew-resize;"></rect>
+              <rect data-handle="e" class="crop-handle" width="18" height="32" fill="transparent" style="cursor: ew-resize;"></rect>
+              <path id="crop-visual-marks" stroke="#0f172a" stroke-width="5" fill="none" stroke-linecap="square" pointer-events="none" style="filter: drop-shadow(0 0 2px #ffffff);"></path>
+            </g>
+          </g>
+        </svg>
+
+        <!-- 手動トリミング操作フローティングバー -->
+        <div id="crop-floating-bar" class="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 border border-indigo-500/80 rounded-xl px-3 py-1.5 shadow-2xl hidden items-center gap-2 text-xs">
+          <span class="font-semibold text-indigo-300 flex items-center gap-1">
+            <i data-lucide="crop" class="w-3.5 h-3.5"></i>
+            トリミング枠:
+          </span>
+          <span id="crop-size-Readout" class="font-mono text-slate-300">800 × 600</span>
+          <button onclick="fitCropToDrawing()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">描画範囲に合わせる</button>
+          <button onclick="resetCropToFull()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">全体に戻す</button>
+          <button onclick="setTool('pen')" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition">完了</button>
+        </div>
+
+        <!-- ベジェペン＆頂点編集操作フローティングバー -->
+        <div id="bezier-floating-bar" class="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 border border-indigo-500/80 rounded-xl px-3 py-1.5 shadow-2xl hidden items-center gap-2 text-xs whitespace-nowrap">
+          <span id="bezier-bar-title" class="font-semibold text-indigo-300">ベジェ曲線ペン:</span>
+          <span id="bezier-bar-hint" class="text-slate-300 text-[11px]">クリックで頂点追加・ドラッグで曲線ハンドル引き出し</span>
+          
+          <!-- 頂点選択時専用のIllustrator風コントロール群 -->
+          <div id="node-point-actions" class="hidden items-center gap-1 border-l border-slate-700 pl-2">
+            <button onclick="convertSelectedNodeToSmooth()" class="px-2 py-1 rounded bg-sky-600/80 hover:bg-sky-500 text-white font-medium transition flex items-center gap-1" title="選択中の角頂点に滑らかな方向線（ハンドル）を生成します (Alt+ドラッグ / ダブルクリックでも可能)">
+              <i data-lucide="spline" class="w-3.5 h-3.5"></i>
+              <span>スムーズ化(方向線を作る)</span>
+            </button>
+            <button onclick="convertSelectedNodeToCorner()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition" title="方向線を収納して角（直線頂点）に戻します">
+              角に戻す
+            </button>
+            <button onclick="deleteSelectedBezierNode()" class="px-2 py-1 rounded bg-rose-700/80 hover:bg-rose-600 text-white transition" title="選択中のアンカーポイントを削除 (Delete / Alt+クリック)">
+              頂点削除
+            </button>
+            <button onclick="deselectActiveBezierNode()" class="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 transition" title="頂点の単一選択を解除して全頂点を表示">
+              全頂点を表示
+            </button>
+          </div>
+
+          <button id="btn-bezier-close" onclick="finishBezierPath(true)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">閉じて確定</button>
+          <button id="btn-bezier-finish" onclick="finishBezierPath(false)" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition">パス確定 (Enter)</button>
+        </div>
+
+        <!-- 自動トレース処理中ローディングオーバーレイ -->
+        <div id="loading-overlay" class="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-30 hidden">
+          <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-sm font-medium text-white">画像を解析してベクター化しています...</p>
+        </div>
+      </div>
+
+      <!-- キャンバス ズームコントロール -->
+      <div class="absolute bottom-4 right-4 z-40 flex flex-col gap-1 bg-slate-800/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700 shadow-xl">
+        <button onclick="zoomCanvas(0.1)" class="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 transition" title="拡大">
+          <i data-lucide="zoom-in" class="w-5 h-5"></i>
+        </button>
+        <button onclick="resetZoom()" id="zoom-level-text" class="text-[10px] font-mono font-bold text-slate-200 py-1 text-center hover:bg-slate-700 rounded transition" title="100%に戻す">100%</button>
+        <button onclick="zoomCanvas(-0.1)" class="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 transition" title="縮小">
+          <i data-lucide="zoom-out" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ==================== 下部 VIBridge 連携出力ドック ==================== -->
+  <footer class="bg-slate-800 border-t border-slate-700 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0 z-20">
+    
+    <!-- 出力整形オプション -->
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-bold">
+          VIBridge 連携設定
+        </span>
+      </div>
+
+      <!-- トリミング方式の選択 -->
+      <div class="flex items-center gap-1.5 text-xs text-slate-200 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+        <span class="text-slate-400">出力範囲:</span>
+        <select id="opt-trim-mode" onchange="onTrimModeSelect(this.value)" class="bg-transparent text-white font-medium focus:outline-none cursor-pointer">
+          <option value="manual" class="bg-slate-800">手動トリミング枠 (Word風調整)</option>
+          <option value="auto" selected class="bg-slate-800">自動トリミング (描画にフィット)</option>
+          <option value="full" class="bg-slate-800">キャンバス全体 (800×600)</option>
+        </select>
+        <button onclick="setTool('crop')" class="ml-1 px-1.5 py-0.5 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-200 hover:text-white text-[11px] transition">枠を調整</button>
+      </div>
+
+      <div id="padding-setting-box" class="flex items-center gap-1 text-xs text-slate-200">
+        <label for="opt-padding" title="自動トリミング時の周囲の余白(px)">余白:</label>
+        <input type="number" id="opt-padding" value="10" min="0" max="100" class="w-12 bg-slate-900 border border-slate-700 rounded px-1 text-center py-0.5 outline-none focus:border-indigo-500">
+        <span>px</span>
+      </div>
+
+      <label class="flex items-center gap-1.5 text-xs text-slate-200 cursor-pointer" title="色を currentColor に変換します。VIBridge側で文字色を変えたときにイラストの色も連動するようになります">
+        <input type="checkbox" id="opt-currentcolor" class="rounded accent-indigo-500 w-4 h-4">
+        <span>色連動 (<code class="text-indigo-300">currentColor</code>)</span>
+      </label>
+
+      <label class="flex items-center gap-1.5 text-xs text-slate-200 cursor-pointer" title="背景に白塗りの矩形を追加します（透過したくない場合にチェック）">
+        <input type="checkbox" id="opt-whitebg" class="rounded accent-indigo-500 w-4 h-4">
+        <span>白背景をつける</span>
+      </label>
+    </div>
+
+    <!-- ワンクリック出力ボタン群 -->
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- 1. インラインSVGコードとしてコピー -->
+      <button onclick="copyForVIBridge('inline')" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-indigo-900/50 transition">
+        <i data-lucide="code-2" class="w-4 h-4"></i>
+        <span>① SVGコードをコピー (HTML埋め込み用)</span>
+      </button>
+
+      <!-- 2. Data URI としてコピー -->
+      <button onclick="copyForVIBridge('datauri')" class="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-purple-900/50 transition">
+        <i data-lucide="image-plus" class="w-4 h-4"></i>
+        <span>② 画像URLをコピー (&lt;img src&gt;用)</span>
+      </button>
+
+      <!-- コード確認モーダル表示ボタン -->
+      <button onclick="openPreviewModal()" class="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-xs flex items-center gap-1.5 transition" title="生成されたコードとトリミング結果を確認">
+        <i data-lucide="eye" class="w-4 h-4"></i>
+        <span class="hidden sm:inline">プレビュー確認</span>
+      </button>
+
+      <!-- 3. SVGファイルとしてダウンロード -->
+      <button onclick="downloadSVGFile()" class="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-xs flex items-center gap-1.5 transition" title=".svgファイルとして保存">
+        <i data-lucide="download" class="w-4 h-4"></i>
+        <span class="hidden sm:inline">.svg保存</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- ==================== プレビュー＆コード確認モーダル ==================== -->
+  <div id="preview-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-3xl w-full p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+        <h3 class="font-bold text-base text-white flex items-center gap-2">
+          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400"></i>
+          VIBridge 出力プレビュー（オートトリミング適用後）
+        </h3>
+        <button onclick="closePreviewModal()" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- トリミング後の見た目確認 -->
+        <div class="space-y-1.5">
+          <span class="text-xs text-slate-400 block">切り抜き後の表示確認（赤枠が実際の境界線）</span>
+          <div class="h-56 bg-checkerboard rounded-xl border border-slate-600 flex items-center justify-center p-4 overflow-hidden">
+            <div id="modal-svg-preview" class="max-w-full max-h-full border-2 border-dashed border-rose-500 flex items-center justify-center"></div>
+          </div>
+        </div>
+
+        <!-- コード出力ボックス -->
+        <div class="space-y-3 flex flex-col justify-between">
+          <div class="space-y-1">
+            <div class="flex justify-between items-center">
+              <span class="text-xs font-semibold text-indigo-300">① インライン &lt;svg&gt; コード</span>
+              <button onclick="copyForVIBridge('inline')" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-2 py-0.5 rounded text-white">コピー</button>
+            </div>
+            <textarea id="modal-code-inline" readonly class="w-full h-20 bg-slate-900 border border-slate-700 rounded-lg p-2 text-[11px] font-mono text-slate-300 focus:outline-none"></textarea>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center">
+              <span class="text-xs font-semibold text-purple-300">② &lt;img src="..."&gt; 用 Data URI</span>
+              <button onclick="copyForVIBridge('datauri')" class="text-xs bg-purple-600 hover:bg-purple-500 px-2 py-0.5 rounded text-white">コピー</button>
+            </div>
+            <textarea id="modal-code-datauri" readonly class="w-full h-20 bg-slate-900 border border-slate-700 rounded-lg p-2 text-[11px] font-mono text-slate-300 focus:outline-none"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button onclick="closePreviewModal()" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium text-white">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 確認ダイアログ（全消去用） ==================== -->
+  <div id="confirm-modal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+        <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+      </div>
+      <h3 class="font-bold text-base text-white">キャンバスをすべて消去しますか？</h3>
+      <p class="text-xs text-slate-400">描いたすべてのパスが消去されます。（Undoで1手前に戻すことは可能です）</p>
+      <div class="flex items-center justify-center gap-3 pt-2">
+        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-200">キャンセル</button>
+        <button onclick="executeClearAll()" class="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white">すべて消去する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知 -->
+  <div id="toast" class="fixed bottom-16 right-5 bg-slate-900 border border-indigo-500 text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-medium translate-y-10 opacity-0 pointer-events-none transition-all duration-300 z-50">
+    <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+    <span id="toast-msg">クリップボードにコピーしました！</span>
+  </div>
+
+  <!-- ==================== メインスクリプト ==================== -->
+  <script>
+    // アイコン初期化
+    lucide.createIcons();
+
+    // --- DOM要素の取得 ---
+    const svgEl = document.getElementById('drawing-svg');
+    const mainGroup = document.getElementById('main-group');
+    const eraserStrokesGroup = document.getElementById('eraser-strokes-group');
+    const activeStrokePath = document.getElementById('active-stroke-path');
+    
+    // プレビュー用図形
+    const previewRect = document.getElementById('preview-rect');
+    const previewCircle = document.getElementById('preview-circle');
+    const previewLine = document.getElementById('preview-line');
+
+    const lazyStringLine = document.getElementById('lazy-string-line');
+    const lazyBrushDot = document.getElementById('lazy-brush-Dot');
+    const underlayCanvas = document.getElementById('underlay-canvas');
+    const underlayCtx = underlayCanvas.getContext('2d', { willReadFrequently: true });
+
+    // 元画像を劣化なく保持するバックアップCanvas（Undoやリアルタイム二値化プレビューで元画像を守るため）
+    const originalUnderlayCanvas = document.createElement('canvas');
+    originalUnderlayCanvas.width = 800;
+    originalUnderlayCanvas.height = 600;
+    const originalUnderlayCtx = originalUnderlayCanvas.getContext('2d', { willReadFrequently: true });
+
+    // --- アプリの状態管理 ---
+    let currentTool = 'pen'; // 'pen' | 'bezier' | 'node' | 'fillpen' | 'rect' | 'circle' | 'line' | 'bucket' | 'recolor' | 'select' | 'crop' | 'eraser-partial' | 'eraser' | 'eyedropper'
+    let currentColor = '#000000';
+    let currentFillColor = '#3b82f6';
+    let isStrokeEnabled = true;
+    let isFillEnabled = false;
+    let currentWidth = 5;
+    let stabilizerLevel = 5; // 0〜12
+    let simplifyTolerance = 1.5; // RDP許容誤差
+
+    let isPointerDown = false;
+    let rawPoints = [];
+    let startPos = { x: 0, y: 0 };
+    let brushPos = { x: 0, y: 0 };
+    let pointerPos = { x: 0, y: 0 };
+    
+    // 複数選択・移動・拡大縮小・コピー＆ペースト用
+    let selectedElements = [];
+    let selectedElement = null; // 互換用（先頭要素）
+    let selectionAction = null; // 'move' | 'resize' | 'marquee' | null
+    let activeResizeHandle = null; // 'nw','n','ne','e','se','s','sw','w'
+    let selectionInitialBBox = null;
+    let selectionSnapshots = []; // 各要素の初期ジオメトリ情報
+    let clipboardSVGItems = []; // コピーした要素のHTML配列
+    let pasteOffsetStep = 0;
+
+    // Illustrator風 ベジェ曲線ペン＆ノード編集用
+    // node構造: { x, y, inX, inY, outX, outY }
+    let bezierNodes = [];
+    let isDrawingBezier = false;
+    let draggingBezierNodeIdx = -1;
+    let draggingBezierPart = null; // 'anchor' | 'in' | 'out' | 'newOut'
+    let activeBezierNodeIdx = -1; // 選択中の単一頂点インデックス（>=0 のとき他の頂点と方向線を非表示）
+    let editingPathElement = null;
+    let editingPathClosed = false;
+
+    // Word風 手動トリミング枠の状態
+    let cropRect = { x: 60, y: 50, w: 680, h: 500 };
+    let hasCustomCrop = false;
+    let activeCropHandle = null; // 'nw','ne','sw','se','n','s','w','e','move'
+    let cropStartRect = null;
+
+    // ズーム管理
+    let currentZoom = 1.0;
+
+    let hasUnderlay = false;
+    let isUnderlayVisible = false;
+
+    // Undo / Redo 履歴スタック（mainGroup.innerHTML と eraserStrokesGroup.innerHTML を保持。下絵は独立保持）
+    let historyStack = [];
+    let historyIndex = -1;
+    
+    // BroadcastChannel連携用
+    const vibridgeChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vibridge_svg_channel') : null;
+
+    // 線と塗りの色変更ハンドラ（選択中の要素があればリアルタイムに適用）
+    function onStrokeFillChange() {
+      currentColor = document.getElementById('color-picker').value;
+      currentFillColor = document.getElementById('fill-color-picker').value;
+      isStrokeEnabled = document.getElementById('stroke-enabled').checked;
+      isFillEnabled = document.getElementById('fill-enabled').checked;
+
+      // 線も塗りもOFFにならないようガード
+      if (!isStrokeEnabled && !isFillEnabled) {
+        isStrokeEnabled = true;
+        document.getElementById('stroke-enabled').checked = true;
+      }
+
+      if (selectedElements.length > 0) {
+        selectedElements.forEach(el => {
+          if (el.parentElement === mainGroup) applyColorsToElement(el);
+        });
+        saveHistory();
+      }
+      if (editingPathElement && editingPathElement.parentElement === mainGroup) {
+        applyColorsToElement(editingPathElement);
+        saveHistory();
+      }
+    }
+
+    function onFillColorPick() {
+      // 塗りのカラーピッカーを触ったら自動的に「塗」チェックをONにする
+      document.getElementById('fill-enabled').checked = true;
+      onStrokeFillChange();
+    }
+
+    function applyColorsToElement(el) {
+      el.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+      if (isStrokeEnabled && (!el.getAttribute('stroke-width') || el.getAttribute('stroke-width') === '0')) {
+        el.setAttribute('stroke-width', currentWidth);
+      }
+      if (el.tagName !== 'line') {
+        el.setAttribute('fill', isFillEnabled ? currentFillColor : 'none');
+      }
+    }
+
+    document.getElementById('stroke-width').addEventListener('input', (e) => {
+      currentWidth = parseFloat(e.target.value);
+      document.getElementById('stroke-width-val').textContent = currentWidth;
+      if (selectedElements.length > 0) {
+        selectedElements.forEach(el => {
+          if (el.parentElement === mainGroup) el.setAttribute('stroke-width', currentWidth);
+        });
+        updateSelectionTransformBox();
+      }
+      if (editingPathElement && editingPathElement.parentElement === mainGroup) {
+        editingPathElement.setAttribute('stroke-width', currentWidth);
+      }
+    });
+    document.getElementById('stroke-width').addEventListener('change', () => {
+      if (selectedElements.length > 0 || editingPathElement) {
+        saveHistory();
+      }
+    });
+
+    document.getElementById('stabilizer-slider').addEventListener('input', (e) => {
+      stabilizerLevel = parseInt(e.target.value, 10);
+      document.getElementById('stabilizer-val').textContent = stabilizerLevel;
+    });
+
+    document.getElementById('simplify-slider').addEventListener('input', (e) => {
+      simplifyTolerance = parseFloat(e.target.value);
+      document.getElementById('simplify-val').textContent = simplifyTolerance;
+    });
+
+    // キーボードショートカット (Ctrl+Z / Ctrl+Y / Ctrl+C / Ctrl+V / Delete / Enter / Escape)
+    window.addEventListener('keydown', (e) => {
+      // input要素等に入力中は無視
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        if (selectedElements.length > 0) {
+          e.preventDefault();
+          copySelectedElements();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        if (clipboardSVGItems.length > 0) {
+          e.preventDefault();
+          pasteCopiedElements();
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if ((currentTool === 'node' || currentTool === 'bezier') && activeBezierNodeIdx >= 0) {
+          e.preventDefault();
+          deleteSelectedBezierNode();
+        } else if (selectedElements.length > 0 && currentTool === 'select') {
+          e.preventDefault();
+          deleteSelectedElements();
+        }
+      } else if (e.key === 'Enter') {
+        if (currentTool === 'bezier' && isDrawingBezier) {
+          e.preventDefault();
+          finishBezierPath(false);
+        } else if (currentTool === 'node' && editingPathElement) {
+          e.preventDefault();
+          clearBezierEditor();
+        }
+      } else if (e.key === 'Escape') {
+        if ((currentTool === 'node' || currentTool === 'bezier') && activeBezierNodeIdx >= 0) {
+          e.preventDefault();
+          deselectActiveBezierNode();
+        } else if (currentTool === 'bezier' && isDrawingBezier) {
+          e.preventDefault();
+          finishBezierPath(false);
+        } else if (currentTool === 'select') {
+          clearElementSelection();
+        }
+      }
+    });
+
+    // ドラッグ＆ドロップでの下絵画像読み込み
+    const boardContainer = document.getElementById('board-container');
+    boardContainer.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      boardContainer.classList.add('ring-4', 'ring-indigo-500');
+    });
+    boardContainer.addEventListener('dragleave', () => {
+      boardContainer.classList.remove('ring-4', 'ring-indigo-500');
+    });
+    boardContainer.addEventListener('drop', (e) => {
+      e.preventDefault();
+      boardContainer.classList.remove('ring-4', 'ring-indigo-500');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        loadImageFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    // --- ツール・カラー切り替え ---
+    function setTool(tool) {
+      // ベジェ描画中に別ツールへ切り替えた場合は現在のパスを確定
+      if (currentTool === 'bezier' && tool !== 'bezier' && isDrawingBezier) {
+        finishBezierPath(false);
+      }
+      if (currentTool === 'node' && tool !== 'node') {
+        clearBezierEditor();
+      }
+
+      currentTool = tool;
+      document.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.classList.remove('bg-indigo-600', 'text-white', 'shadow');
+        btn.classList.add('text-slate-300');
+      });
+      const activeBtn = document.getElementById(`tool-${tool}`);
+      if (activeBtn) {
+        activeBtn.classList.add('bg-indigo-600', 'text-white', 'shadow');
+        activeBtn.classList.remove('text-slate-300');
+      }
+
+      // 選択ツール以外に切り替えたら選択ハイライトを解除
+      if (tool !== 'select') {
+        clearElementSelection();
+      }
+
+      // ベジェ・ノード編集バーの表示制御
+      const bezierBar = document.getElementById('bezier-floating-bar');
+      const bezierGroup = document.getElementById('bezier-editor-group');
+      if (tool === 'bezier') {
+        bezierGroup.classList.remove('hidden');
+        bezierBar.classList.remove('hidden');
+        bezierBar.classList.add('flex');
+        document.getElementById('bezier-bar-title').textContent = 'ベジェ曲線ペン:';
+        document.getElementById('bezier-bar-hint').textContent = 'クリックで頂点・ドラッグで方向線 / 線クリックで追加・Alt+ドラッグで角から方向線引き出し';
+        document.getElementById('btn-bezier-close').classList.remove('hidden');
+        document.getElementById('btn-bezier-finish').textContent = 'パス確定 (Enter)';
+        updateNodeActionButtonsUI();
+      } else if (tool === 'node') {
+        bezierGroup.classList.remove('hidden');
+        bezierBar.classList.remove('hidden');
+        bezierBar.classList.add('flex');
+        document.getElementById('bezier-bar-title').textContent = '頂点・方向線編集:';
+        document.getElementById('bezier-bar-hint').textContent = '頂点クリックで単一表示 / 線上クリックで頂点追加 / Alt+ドラッグ(またはWクリック)で方向線作成';
+        document.getElementById('btn-bezier-close').classList.add('hidden');
+        document.getElementById('btn-bezier-finish').textContent = '編集完了';
+        updateNodeActionButtonsUI();
+      } else {
+        bezierGroup.classList.add('hidden');
+        bezierBar.classList.add('hidden');
+        bezierBar.classList.remove('flex');
+      }
+
+      // 手動トリミングモードの表示切り替え
+      const cropGroup = document.getElementById('crop-overlay-group');
+      const cropBar = document.getElementById('crop-floating-bar');
+      if (tool === 'crop') {
+        if (!hasCustomCrop) {
+          fitCropToDrawing(true);
+        }
+        cropGroup.classList.remove('hidden');
+        cropBar.classList.remove('hidden');
+        cropBar.classList.add('flex');
+        document.getElementById('opt-trim-mode').value = 'manual';
+        onTrimModeSelect('manual', false);
+        updateCropOverlayUI();
+      } else {
+        cropGroup.classList.add('hidden');
+        cropBar.classList.add('hidden');
+        cropBar.classList.remove('flex');
+      }
+
+      // カーソルとホバー効果の切り替え
+      svgEl.classList.remove('mode-eraser', 'mode-recolor', 'mode-select');
+      if (tool === 'eraser') {
+        svgEl.classList.add('mode-eraser');
+        svgEl.style.cursor = 'crosshair';
+      } else if (tool === 'recolor') {
+        svgEl.classList.add('mode-recolor');
+        svgEl.style.cursor = 'crosshair';
+      } else if (tool === 'bucket') {
+        svgEl.style.cursor = 'crosshair';
+      } else if (tool === 'select') {
+        svgEl.classList.add('mode-select');
+        svgEl.style.cursor = 'default';
+      } else if (tool === 'node') {
+        svgEl.classList.add('mode-select');
+        svgEl.style.cursor = 'pointer';
+      } else if (tool === 'crop') {
+        svgEl.style.cursor = 'default';
+      } else if (tool === 'eraser-partial') {
+        svgEl.style.cursor = 'crosshair';
+      } else {
+        svgEl.style.cursor = 'crosshair';
+      }
+    }
+
+    function clearElementSelection() {
+      selectedElements.forEach(el => el.classList.remove('selected-element'));
+      selectedElements = [];
+      selectedElement = null;
+      document.getElementById('selection-transform-group').classList.add('hidden');
+      const label = document.getElementById('btn-uniform-label');
+      if (label) label.textContent = '全パスの太さを均一化';
+      updateClipboardButtons();
+    }
+
+    function selectElementForEdit(el, addToSelection = false) {
+      if (!el || el.parentElement !== mainGroup) return;
+
+      if (addToSelection) {
+        const idx = selectedElements.indexOf(el);
+        if (idx >= 0) {
+          el.classList.remove('selected-element');
+          selectedElements.splice(idx, 1);
+        } else {
+          el.classList.add('selected-element');
+          selectedElements.push(el);
+        }
+      } else {
+        if (!selectedElements.includes(el)) {
+          clearElementSelection();
+          el.classList.add('selected-element');
+          selectedElements = [el];
+        }
+      }
+
+      selectedElement = selectedElements[0] || null;
+      if (!selectedElement) {
+        clearElementSelection();
+        return;
+      }
+
+      // 選択した先頭要素の線色・塗色・太さを上部UIに同期
+      const st = selectedElement.getAttribute('stroke');
+      const fl = selectedElement.getAttribute('fill');
+      const sw = parseFloat(selectedElement.getAttribute('stroke-width') || currentWidth);
+
+      if (st && st !== 'none') {
+        isStrokeEnabled = true;
+        document.getElementById('stroke-enabled').checked = true;
+        if (st.startsWith('#')) {
+          currentColor = st;
+          document.getElementById('color-picker').value = st;
+        }
+      } else {
+        isStrokeEnabled = false;
+        document.getElementById('stroke-enabled').checked = false;
+      }
+
+      if (fl && fl !== 'none') {
+        isFillEnabled = true;
+        document.getElementById('fill-enabled').checked = true;
+        if (fl.startsWith('#')) {
+          currentFillColor = fl;
+          document.getElementById('fill-color-picker').value = fl;
+        }
+      } else {
+        isFillEnabled = false;
+        document.getElementById('fill-enabled').checked = false;
+      }
+
+      if (!isNaN(sw) && sw > 0) {
+        currentWidth = sw;
+        document.getElementById('stroke-width').value = sw;
+        document.getElementById('stroke-width-val').textContent = sw;
+        document.getElementById('uniform-width-input').value = sw;
+      }
+
+      const label = document.getElementById('btn-uniform-label');
+      if (label) label.textContent = `選択パス(${selectedElements.length}個)の太さを変更`;
+
+      updateSelectionTransformBox();
+      updateClipboardButtons();
+    }
+
+    function setQuickColor(hex) {
+      currentColor = hex;
+      document.getElementById('color-picker').value = hex;
+      if (isFillEnabled) {
+        currentFillColor = hex;
+        document.getElementById('fill-color-picker').value = hex;
+      }
+      if (selectedElements.length > 0) {
+        selectedElements.forEach(el => {
+          if (el.parentElement === mainGroup) applyColorsToElement(el);
+        });
+        saveHistory();
+        return;
+      }
+      if (editingPathElement && editingPathElement.parentElement === mainGroup) {
+        applyColorsToElement(editingPathElement);
+        saveHistory();
+        return;
+      }
+      if (currentTool === 'eraser' || currentTool === 'eyedropper') {
+        setTool('pen');
+      }
+    }
+
+    // --- 複数選択のバウンディングボックス・拡大縮小・移動・コピペ機能 ---
+    // 要素に transform="translate(tx, ty)" が残っている場合、実際の座標属性に焼き込んで正規化する
+    function bakeElementTransform(el) {
+      const transform = el.getAttribute('transform');
+      if (!transform) return;
+      const m = transform.match(/translate\(\s*([^,\s]+)[,\s]+([^)]+)\)/);
+      if (m) {
+        const tx = parseFloat(m[1]) || 0;
+        const ty = parseFloat(m[2]) || 0;
+        transformElementGeometry(el, captureElementGeometry(el), { x: 0, y: 0, w: 100, h: 100 }, { x: tx, y: ty, w: 100, h: 100 });
+      }
+      el.removeAttribute('transform');
+    }
+
+    function captureElementGeometry(el) {
+      const tag = el.tagName.toLowerCase();
+      const sw = parseFloat(el.getAttribute('stroke-width') || '1');
+      if (tag === 'path') {
+        return { tag, d: el.getAttribute('d') || '', sw };
+      } else if (tag === 'rect') {
+        return {
+          tag, sw,
+          x: parseFloat(el.getAttribute('x') || 0),
+          y: parseFloat(el.getAttribute('y') || 0),
+          w: parseFloat(el.getAttribute('width') || 0),
+          h: parseFloat(el.getAttribute('height') || 0)
+        };
+      } else if (tag === 'circle' || tag === 'ellipse') {
+        return {
+          tag, sw,
+          cx: parseFloat(el.getAttribute('cx') || 0),
+          cy: parseFloat(el.getAttribute('cy') || 0),
+          r: parseFloat(el.getAttribute('r') || 0),
+          rx: parseFloat(el.getAttribute('rx') || el.getAttribute('r') || 0),
+          ry: parseFloat(el.getAttribute('ry') || el.getAttribute('r') || 0)
+        };
+      } else if (tag === 'line') {
+        return {
+          tag, sw,
+          x1: parseFloat(el.getAttribute('x1') || 0),
+          y1: parseFloat(el.getAttribute('y1') || 0),
+          x2: parseFloat(el.getAttribute('x2') || 0),
+          y2: parseFloat(el.getAttribute('y2') || 0)
+        };
+      }
+      return { tag, sw };
+    }
+
+    // 初期バウンディングボックス(oldBox)から新しいバウンディングボックス(newBox)へのアフィン変換を適用
+    function transformElementGeometry(el, snap, oldBox, newBox) {
+      const sx = oldBox.w > 0.001 ? newBox.w / oldBox.w : 1;
+      const sy = oldBox.h > 0.001 ? newBox.h / oldBox.h : 1;
+      const mapX = (x) => newBox.x + (x - oldBox.x) * sx;
+      const mapY = (y) => newBox.y + (y - oldBox.y) * sy;
+
+      if (snap.tag === 'path') {
+        const tokens = snap.d.match(/[a-zA-Z]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g);
+        if (!tokens) return;
+        let out = [];
+        let i = 0;
+        let cmd = '';
+        while (i < tokens.length) {
+          if (/^[a-zA-Z]$/.test(tokens[i])) {
+            cmd = tokens[i];
+            out.push(cmd);
+            i++;
+            continue;
+          }
+          const upper = cmd.toUpperCase();
+          if (upper === 'H') {
+            const x = parseFloat(tokens[i++]);
+            out.push(mapX(x).toFixed(1));
+          } else if (upper === 'V') {
+            const y = parseFloat(tokens[i++]);
+            out.push(mapY(y).toFixed(1));
+          } else if (upper === 'A') {
+            const rx = parseFloat(tokens[i++]) * Math.abs(sx);
+            const ry = parseFloat(tokens[i++]) * Math.abs(sy);
+            const rot = tokens[i++];
+            const laf = tokens[i++];
+            const sf = tokens[i++];
+            const x = mapX(parseFloat(tokens[i++]));
+            const y = mapY(parseFloat(tokens[i++]));
+            out.push(rx.toFixed(1), ry.toFixed(1), rot, laf, sf, x.toFixed(1), y.toFixed(1));
+          } else {
+            const x = parseFloat(tokens[i++]);
+            const y = parseFloat(tokens[i++]);
+            if (!isNaN(x) && !isNaN(y)) {
+              out.push(mapX(x).toFixed(1), mapY(y).toFixed(1));
+            }
+          }
+        }
+        el.setAttribute('d', out.join(' '));
+      } else if (snap.tag === 'rect') {
+        const x1 = mapX(snap.x), y1 = mapY(snap.y);
+        const x2 = mapX(snap.x + snap.w), y2 = mapY(snap.y + snap.h);
+        el.setAttribute('x', Math.min(x1, x2).toFixed(1));
+        el.setAttribute('y', Math.min(y1, y2).toFixed(1));
+        el.setAttribute('width', Math.max(1, Math.abs(x2 - x1)).toFixed(1));
+        el.setAttribute('height', Math.max(1, Math.abs(y2 - y1)).toFixed(1));
+      } else if (snap.tag === 'circle' || snap.tag === 'ellipse') {
+        const cx = mapX(snap.cx), cy = mapY(snap.cy);
+        const rx = Math.max(1, snap.rx * Math.abs(sx));
+        const ry = Math.max(1, snap.ry * Math.abs(sy));
+        el.setAttribute('cx', cx.toFixed(1));
+        el.setAttribute('cy', cy.toFixed(1));
+        if (snap.tag === 'circle' && Math.abs(rx - ry) < 0.5) {
+          el.setAttribute('r', rx.toFixed(1));
+        } else {
+          el.setAttribute('r', ((rx + ry) / 2).toFixed(1));
+        }
+      } else if (snap.tag === 'line') {
+        el.setAttribute('x1', mapX(snap.x1).toFixed(1));
+        el.setAttribute('y1', mapY(snap.y1).toFixed(1));
+        el.setAttribute('x2', mapX(snap.x2).toFixed(1));
+        el.setAttribute('y2', mapY(snap.y2).toFixed(1));
+      }
+    }
+
+    function getCombinedSelectionBBox() {
+      selectedElements = selectedElements.filter(el => el && el.parentElement === mainGroup);
+      if (selectedElements.length === 0) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      selectedElements.forEach(el => {
+        bakeElementTransform(el);
+        try {
+          const b = el.getBBox();
+          if (b.width === 0 && b.height === 0) return;
+          minX = Math.min(minX, b.x);
+          minY = Math.min(minY, b.y);
+          maxX = Math.max(maxX, b.x + b.width);
+          maxY = Math.max(maxY, b.y + b.height);
+        } catch (e) {}
+      });
+      if (!isFinite(minX)) return null;
+      return {
+        x: minX,
+        y: minY,
+        w: Math.max(8, maxX - minX),
+        h: Math.max(8, maxY - minY)
+      };
+    }
+
+    function updateSelectionTransformBox(customBox = null) {
+      const group = document.getElementById('selection-transform-group');
+      if (currentTool !== 'select' || selectedElements.length === 0) {
+        group.classList.add('hidden');
+        return;
+      }
+      const box = customBox || getCombinedSelectionBBox();
+      if (!box) {
+        group.classList.add('hidden');
+        return;
+      }
+      group.classList.remove('hidden');
+      const pad = 4;
+      const bx = box.x - pad, by = box.y - pad;
+      const bw = box.w + pad * 2, bh = box.h + pad * 2;
+
+      const rectEl = document.getElementById('sel-bbox-rect');
+      rectEl.setAttribute('x', bx);
+      rectEl.setAttribute('y', by);
+      rectEl.setAttribute('width', bw);
+      rectEl.setAttribute('height', bh);
+
+      const cx = bx + bw / 2, cy = by + bh / 2;
+      const pos = {
+        nw: [bx - 6, by - 6],
+        n:  [cx - 6, by - 6],
+        ne: [bx + bw - 6, by - 6],
+        e:  [bx + bw - 6, cy - 6],
+        se: [bx + bw - 6, by + bh - 6],
+        s:  [cx - 6, by + bh - 6],
+        sw: [bx - 6, by + bh - 6],
+        w:  [bx - 6, cy - 6]
+      };
+      document.querySelectorAll('#sel-handles-layer .sel-handle').forEach(h => {
+        const k = h.getAttribute('data-sel-handle');
+        if (pos[k]) {
+          h.setAttribute('x', pos[k][0]);
+          h.setAttribute('y', pos[k][1]);
+        }
+      });
+    }
+
+    function copySelectedElements() {
+      selectedElements = selectedElements.filter(el => el && el.parentElement === mainGroup);
+      if (selectedElements.length === 0) {
+        showToast('コピーする要素を選択してください');
+        return;
+      }
+      clipboardSVGItems = selectedElements.map(el => {
+        bakeElementTransform(el);
+        const clone = el.cloneNode(true);
+        clone.classList.remove('selected-element');
+        return clone.outerHTML;
+      });
+      pasteOffsetStep = 0;
+      updateClipboardButtons();
+      showToast(`${clipboardSVGItems.length} 個の要素をコピーしました (Ctrl+V で貼り付け)`);
+    }
+
+    function pasteCopiedElements() {
+      if (clipboardSVGItems.length === 0) {
+        showToast('クリップボードに要素がありません');
+        return;
+      }
+      setTool('select');
+      clearElementSelection();
+      pasteOffsetStep = (pasteOffsetStep % 5) + 1;
+      const offset = 18 * pasteOffsetStep;
+
+      const parser = new DOMParser();
+      const newEls = [];
+      clipboardSVGItems.forEach(html => {
+        const doc = parser.parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${html}</svg>`, 'image/svg+xml');
+        const el = doc.documentElement.firstElementChild;
+        if (el) {
+          const imported = document.importNode(el, true);
+          mainGroup.appendChild(imported);
+          const snap = captureElementGeometry(imported);
+          transformElementGeometry(imported, snap, { x: 0, y: 0, w: 100, h: 100 }, { x: offset, y: offset, w: 100, h: 100 });
+          imported.classList.add('selected-element');
+          newEls.push(imported);
+        }
+      });
+
+      selectedElements = newEls;
+      selectedElement = selectedElements[0] || null;
+      updateSelectionTransformBox();
+      updateClipboardButtons();
+      saveHistory();
+      showToast(`${newEls.length} 個の要素を貼り付けました`);
+    }
+
+    function deleteSelectedElements() {
+      if (selectedElements.length === 0) return;
+      const count = selectedElements.length;
+      selectedElements.forEach(el => el.remove());
+      clearElementSelection();
+      saveHistory();
+      showToast(`${count} 個の選択要素を削除しました`);
+    }
+
+    function updateClipboardButtons() {
+      const hasSel = selectedElements.length > 0;
+      const copyBtn = document.getElementById('btn-copy-sel');
+      const pasteBtn = document.getElementById('btn-paste-sel');
+      const delBtn = document.getElementById('btn-delete-sel');
+      if (copyBtn) copyBtn.disabled = !hasSel;
+      if (delBtn) delBtn.disabled = !hasSel;
+      if (pasteBtn) pasteBtn.disabled = (clipboardSVGItems.length === 0);
+    }
+
+    // --- Illustrator風 ベジェ曲線ペン＆アンカーポイント（頂点・ハンドル）編集エンジン ---
+    function buildBezierDFromNodes(nodes, closed = false) {
+      if (!nodes || nodes.length === 0) return '';
+      let d = `M ${nodes[0].x.toFixed(1)} ${nodes[0].y.toFixed(1)}`;
+      for (let i = 1; i < nodes.length; i++) {
+        const prev = nodes[i - 1];
+        const curr = nodes[i];
+        d += ` C ${prev.outX.toFixed(1)} ${prev.outY.toFixed(1)} ${curr.inX.toFixed(1)} ${curr.inY.toFixed(1)} ${curr.x.toFixed(1)} ${curr.y.toFixed(1)}`;
+      }
+      if (closed && nodes.length > 2) {
+        const last = nodes[nodes.length - 1];
+        const first = nodes[0];
+        d += ` C ${last.outX.toFixed(1)} ${last.outY.toFixed(1)} ${first.inX.toFixed(1)} ${first.inY.toFixed(1)} ${first.x.toFixed(1)} ${first.y.toFixed(1)} Z`;
+      }
+      return d;
+    }
+
+    // 任意のSVG <path> の d 属性を解析し、編集可能なベジェノード配列に変換する
+    function parseSVGPathToBezierNodes(dStr) {
+      const tokens = dStr.match(/[a-zA-Z]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g);
+      if (!tokens) return { nodes: [], closed: false };
+
+      let nodes = [];
+      let closed = false;
+      let i = 0;
+      let cmd = '';
+      let curX = 0, curY = 0;
+
+      while (i < tokens.length) {
+        if (/^[a-zA-Z]$/.test(tokens[i])) {
+          cmd = tokens[i++];
+          if (cmd.toUpperCase() === 'Z') {
+            closed = true;
+          }
+          continue;
+        }
+        if (cmd === 'M') {
+          const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+          curX = x; curY = y;
+          nodes.push({ x, y, inX: x, inY: y, outX: x, outY: y });
+          cmd = 'L';
+        } else if (cmd === 'L') {
+          const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+          curX = x; curY = y;
+          nodes.push({ x, y, inX: x, inY: y, outX: x, outY: y });
+        } else if (cmd === 'Q') {
+          const qx = parseFloat(tokens[i++]), qy = parseFloat(tokens[i++]);
+          const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+          if (nodes.length > 0) {
+            const prev = nodes[nodes.length - 1];
+            prev.outX = prev.x + (2 / 3) * (qx - prev.x);
+            prev.outY = prev.y + (2 / 3) * (qy - prev.y);
+          }
+          const inX = x + (2 / 3) * (qx - x);
+          const inY = y + (2 / 3) * (qy - y);
+          nodes.push({ x, y, inX, inY, outX: x, outY: y });
+          curX = x; curY = y;
+        } else if (cmd === 'C') {
+          const c1x = parseFloat(tokens[i++]), c1y = parseFloat(tokens[i++]);
+          const c2x = parseFloat(tokens[i++]), c2y = parseFloat(tokens[i++]);
+          const x = parseFloat(tokens[i++]), y = parseFloat(tokens[i++]);
+          if (nodes.length > 0) {
+            const prev = nodes[nodes.length - 1];
+            prev.outX = c1x; prev.outY = c1y;
+          }
+          nodes.push({ x, y, inX: c2x, inY: c2y, outX: x, outY: y });
+          curX = x; curY = y;
+        } else {
+          i++;
+        }
+      }
+
+      // 頂点数が非常に多い自動トレースパス等は、ハンドル編集しやすいよう適度に間引く
+      if (nodes.length > 35) {
+        const step = Math.ceil(nodes.length / 24);
+        const reduced = [];
+        for (let k = 0; k < nodes.length; k += step) {
+          reduced.push(nodes[k]);
+        }
+        // 前後の点から滑らかな初期ハンドルを自動計算（Catmull-Rom風）
+        for (let k = 0; k < reduced.length; k++) {
+          const prev = reduced[(k - 1 + reduced.length) % reduced.length];
+          const curr = reduced[k];
+          const next = reduced[(k + 1) % reduced.length];
+          if (!closed && (k === 0 || k === reduced.length - 1)) continue;
+          const tx = (next.x - prev.x) * 0.2;
+          const ty = (next.y - prev.y) * 0.2;
+          curr.inX = curr.x - tx;
+          curr.inY = curr.y - ty;
+          curr.outX = curr.x + tx;
+          curr.outY = curr.y + ty;
+        }
+        nodes = reduced;
+      }
+
+      return { nodes, closed };
+    }
+
+    // 3次ベジェ曲線上の点と、指定座標(pt)との最短距離およびパラメータ t を求める
+    function closestPointOnCubicSegment(p0, p1, p2, p3, pt) {
+      let minDist = Infinity;
+      let bestT = 0.5;
+      const steps = 40;
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const mt = 1 - t;
+        const x = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
+        const y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
+        const d = Math.hypot(pt.x - x, pt.y - y);
+        if (d < minDist) {
+          minDist = d;
+          bestT = t;
+        }
+      }
+      return { dist: minDist, t: bestT };
+    }
+
+    // ド・カステリョのアルゴリズムでセグメントを位置 t で分割し、曲線の形を保ったまま新しいアンカーポイントを挿入する
+    function insertBezierNodeAtPoint(pt, threshold = 10) {
+      if (bezierNodes.length < 2) return -1;
+      const segCount = editingPathClosed ? bezierNodes.length : bezierNodes.length - 1;
+      let bestSeg = -1;
+      let bestT = 0.5;
+      let minDist = Infinity;
+
+      for (let i = 0; i < segCount; i++) {
+        const n1 = bezierNodes[i];
+        const n2 = bezierNodes[(i + 1) % bezierNodes.length];
+        const p0 = { x: n1.x, y: n1.y };
+        const p1 = { x: n1.outX, y: n1.outY };
+        const p2 = { x: n2.inX, y: n2.inY };
+        const p3 = { x: n2.x, y: n2.y };
+        const res = closestPointOnCubicSegment(p0, p1, p2, p3, pt);
+        if (res.dist < minDist) {
+          minDist = res.dist;
+          bestSeg = i;
+          bestT = res.t;
+        }
+      }
+
+      if (bestSeg === -1 || minDist > threshold) return -1;
+      // 既存の頂点に近すぎる場合は挿入しない
+      const t = Math.max(0.08, Math.min(0.92, bestT));
+      const idx1 = bestSeg;
+      const idx2 = (bestSeg + 1) % bezierNodes.length;
+      const n1 = bezierNodes[idx1];
+      const n2 = bezierNodes[idx2];
+
+      const p0 = { x: n1.x, y: n1.y };
+      const p1 = { x: n1.outX, y: n1.outY };
+      const p2 = { x: n2.inX, y: n2.inY };
+      const p3 = { x: n2.x, y: n2.y };
+
+      const lerp = (a, b, u) => ({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u });
+      const q0 = lerp(p0, p1, t);
+      const q1 = lerp(p1, p2, t);
+      const q2 = lerp(p2, p3, t);
+      const r0 = lerp(q0, q1, t);
+      const r1 = lerp(q1, q2, t);
+      const s = lerp(r0, r1, t);
+
+      // 元のセグメントの前後ハンドル長がほぼゼロ（直線セグメント）だった場合は直線頂点として追加
+      const wasStraight = Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1 && Math.hypot(p2.x - p3.x, p2.y - p3.y) < 1;
+
+      if (wasStraight) {
+        const newNode = { x: s.x, y: s.y, inX: s.x, inY: s.y, outX: s.x, outY: s.y };
+        bezierNodes.splice(idx1 + 1, 0, newNode);
+      } else {
+        n1.outX = q0.x; n1.outY = q0.y;
+        n2.inX = q2.x;  n2.inY = q2.y;
+        const newNode = { x: s.x, y: s.y, inX: r0.x, inY: r0.y, outX: r1.x, outY: r1.y };
+        bezierNodes.splice(idx1 + 1, 0, newNode);
+      }
+      return idx1 + 1;
+    }
+
+    // 選択中の角・直線頂点にIllustrator同様のスムーズ方向線（ハンドル）を生成する
+    function convertSelectedNodeToSmooth() {
+      if (activeBezierNodeIdx < 0 || activeBezierNodeIdx >= bezierNodes.length) {
+        showToast('先に頂点をクリックして選択してください');
+        return;
+      }
+      const idx = activeBezierNodeIdx;
+      const len = bezierNodes.length;
+      const curr = bezierNodes[idx];
+      const prev = bezierNodes[(idx - 1 + len) % len];
+      const next = bezierNodes[(idx + 1) % len];
+
+      let tx = (next.x - prev.x) * 0.28;
+      let ty = (next.y - prev.y) * 0.28;
+      if (Math.hypot(tx, ty) < 8) {
+        tx = 36; ty = 0;
+      }
+      curr.inX = curr.x - tx;
+      curr.inY = curr.y - ty;
+      curr.outX = curr.x + tx;
+      curr.outY = curr.y + ty;
+
+      renderBezierEditorOverlay();
+      if (editingPathElement) saveHistory();
+      showToast('選択した頂点に方向線（ハンドル）を作成しました');
+    }
+
+    // 選択中の頂点の方向線を折りたたんで角（コーナー）頂点に戻す
+    function convertSelectedNodeToCorner() {
+      if (activeBezierNodeIdx < 0 || activeBezierNodeIdx >= bezierNodes.length) return;
+      const curr = bezierNodes[activeBezierNodeIdx];
+      curr.inX = curr.x; curr.inY = curr.y;
+      curr.outX = curr.x; curr.outY = curr.y;
+      renderBezierEditorOverlay();
+      if (editingPathElement) saveHistory();
+      showToast('頂点を角（直線）に変換しました');
+    }
+
+    // 選択中のアンカーポイントを削除
+    function deleteSelectedBezierNode() {
+      if (activeBezierNodeIdx < 0 || activeBezierNodeIdx >= bezierNodes.length) return;
+      if (bezierNodes.length <= 2) {
+        showToast('パスには最低2つの頂点が必要です');
+        return;
+      }
+      bezierNodes.splice(activeBezierNodeIdx, 1);
+      activeBezierNodeIdx = -1;
+      updateNodeActionButtonsUI();
+      renderBezierEditorOverlay();
+      if (editingPathElement) saveHistory();
+      showToast('アンカーポイントを削除しました');
+    }
+
+    function deselectActiveBezierNode() {
+      activeBezierNodeIdx = -1;
+      updateNodeActionButtonsUI();
+      renderBezierEditorOverlay();
+    }
+
+    function updateNodeActionButtonsUI() {
+      const box = document.getElementById('node-point-actions');
+      const hint = document.getElementById('bezier-bar-hint');
+      if (!box) return;
+      if (activeBezierNodeIdx >= 0 && bezierNodes[activeBezierNodeIdx]) {
+        box.classList.remove('hidden');
+        box.classList.add('flex');
+        if (hint) hint.classList.add('hidden');
+      } else {
+        box.classList.add('hidden');
+        box.classList.remove('flex');
+        if (hint) hint.classList.remove('hidden');
+      }
+    }
+
+    function renderBezierEditorOverlay() {
+      const wipPath = document.getElementById('bezier-wip-path');
+      const rubberPath = document.getElementById('bezier-rubber-path');
+      const handlesLayer = document.getElementById('bezier-handles-layer');
+      handlesLayer.innerHTML = '';
+
+      if (currentTool === 'bezier' && isDrawingBezier && bezierNodes.length > 0) {
+        wipPath.setAttribute('d', buildBezierDFromNodes(bezierNodes, false));
+        wipPath.setAttribute('stroke', isStrokeEnabled ? currentColor : '#6366f1');
+        wipPath.setAttribute('stroke-width', currentWidth);
+        wipPath.setAttribute('fill', isFillEnabled ? currentFillColor : 'none');
+        wipPath.setAttribute('fill-opacity', isFillEnabled ? '0.35' : '0');
+      } else {
+        wipPath.setAttribute('d', '');
+        rubberPath.setAttribute('d', '');
+      }
+
+      if (editingPathElement && bezierNodes.length > 0) {
+        editingPathElement.setAttribute('d', buildBezierDFromNodes(bezierNodes, editingPathClosed));
+      }
+
+      // 各アンカーポイントと方向線（in / out ハンドル）の描画
+      // 要件：頂点をひとつ選択したら（activeBezierNodeIdx >= 0）、他の頂点と方向線の表示を消す
+      bezierNodes.forEach((n, idx) => {
+        if (activeBezierNodeIdx >= 0 && idx !== activeBezierNodeIdx) {
+          return;
+        }
+
+        const isSelectedNode = (idx === activeBezierNodeIdx);
+        const hasIn = Math.hypot(n.inX - n.x, n.inY - n.y) > 0.8;
+        const hasOut = Math.hypot(n.outX - n.x, n.outY - n.y) > 0.8;
+
+        if (hasIn) {
+          const lineIn = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          lineIn.setAttribute('x1', n.x); lineIn.setAttribute('y1', n.y);
+          lineIn.setAttribute('x2', n.inX); lineIn.setAttribute('y2', n.inY);
+          lineIn.setAttribute('stroke', '#38bdf8'); lineIn.setAttribute('stroke-width', '1.8');
+          handlesLayer.appendChild(lineIn);
+
+          const cIn = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          cIn.setAttribute('cx', n.inX); cIn.setAttribute('cy', n.inY);
+          cIn.setAttribute('r', '5.5');
+          cIn.setAttribute('fill', '#38bdf8'); cIn.setAttribute('stroke', '#0f172a'); cIn.setAttribute('stroke-width', '1.5');
+          cIn.setAttribute('data-bnode', idx); cIn.setAttribute('data-bpart', 'in');
+          cIn.style.cursor = 'pointer';
+          handlesLayer.appendChild(cIn);
+        }
+
+        if (hasOut) {
+          const lineOut = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          lineOut.setAttribute('x1', n.x); lineOut.setAttribute('y1', n.y);
+          lineOut.setAttribute('x2', n.outX); lineOut.setAttribute('y2', n.outY);
+          lineOut.setAttribute('stroke', '#38bdf8'); lineOut.setAttribute('stroke-width', '1.8');
+          handlesLayer.appendChild(lineOut);
+
+          const cOut = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          cOut.setAttribute('cx', n.outX); cOut.setAttribute('cy', n.outY);
+          cOut.setAttribute('r', '5.5');
+          cOut.setAttribute('fill', '#38bdf8'); cOut.setAttribute('stroke', '#0f172a'); cOut.setAttribute('stroke-width', '1.5');
+          cOut.setAttribute('data-bnode', idx); cOut.setAttribute('data-bpart', 'out');
+          cOut.style.cursor = 'pointer';
+          handlesLayer.appendChild(cOut);
+        }
+
+        // アンカーポイント（選択中は青塗りで強調表示）
+        const anchor = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const sz = isSelectedNode ? 10 : ((idx === 0 && isDrawingBezier) ? 10 : 8);
+        anchor.setAttribute('x', n.x - sz / 2);
+        anchor.setAttribute('y', n.y - sz / 2);
+        anchor.setAttribute('width', sz);
+        anchor.setAttribute('height', sz);
+        anchor.setAttribute('fill', isSelectedNode ? '#4f46e5' : ((idx === 0 && isDrawingBezier) ? '#f59e0b' : '#ffffff'));
+        anchor.setAttribute('stroke', isSelectedNode ? '#ffffff' : '#4f46e5');
+        anchor.setAttribute('stroke-width', '2');
+        anchor.setAttribute('rx', '1.5');
+        anchor.setAttribute('data-bnode', idx);
+        anchor.setAttribute('data-bpart', 'anchor');
+        anchor.style.cursor = 'move';
+        handlesLayer.appendChild(anchor);
+      });
+    }
+
+    function finishBezierPath(closePath = false) {
+      if (!isDrawingBezier || bezierNodes.length === 0) {
+        clearBezierEditor();
+        return;
+      }
+      if (bezierNodes.length >= 2) {
+        const d = buildBezierDFromNodes(bezierNodes, closePath);
+        const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        newPath.setAttribute('d', d);
+        newPath.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+        newPath.setAttribute('stroke-width', currentWidth);
+        newPath.setAttribute('fill', isFillEnabled ? currentFillColor : (closePath && !isStrokeEnabled ? currentColor : 'none'));
+        mainGroup.appendChild(newPath);
+        saveHistory();
+        showToast('ベジェ曲線パスを確定しました');
+      }
+      clearBezierEditor();
+    }
+
+    function clearBezierEditor() {
+      bezierNodes = [];
+      isDrawingBezier = false;
+      draggingBezierNodeIdx = -1;
+      draggingBezierPart = null;
+      activeBezierNodeIdx = -1;
+      updateNodeActionButtonsUI();
+      if (editingPathElement) {
+        editingPathElement.classList.remove('selected-element');
+        editingPathElement = null;
+      }
+      document.getElementById('bezier-wip-path').setAttribute('d', '');
+      document.getElementById('bezier-rubber-path').setAttribute('d', '');
+      document.getElementById('bezier-handles-layer').innerHTML = '';
+    }
+
+    // ダブルクリック時：
+    // 1. 頂点の上でダブルクリックした場合は「角（方向線なし）⇄ スムーズ（方向線あり）」を切り替え
+    // 2. ベジェ曲線ペン描画中に空白でダブルクリックした場合はパスを確定
+    svgEl.addEventListener('dblclick', (e) => {
+      const bNodeAttr = e.target.getAttribute && e.target.getAttribute('data-bnode');
+      const bPartAttr = e.target.getAttribute && e.target.getAttribute('data-bpart');
+      if ((currentTool === 'node' || currentTool === 'bezier') && bNodeAttr !== null && bPartAttr === 'anchor') {
+        e.preventDefault();
+        const idx = parseInt(bNodeAttr, 10);
+        activeBezierNodeIdx = idx;
+        updateNodeActionButtonsUI();
+        const n = bezierNodes[idx];
+        if (n) {
+          const hasHandles = Math.hypot(n.inX - n.x, n.inY - n.y) > 1.5 || Math.hypot(n.outX - n.x, n.outY - n.y) > 1.5;
+          if (hasHandles) {
+            convertSelectedNodeToCorner();
+          } else {
+            convertSelectedNodeToSmooth();
+          }
+        }
+        return;
+      }
+      if (currentTool === 'bezier' && isDrawingBezier) {
+        e.preventDefault();
+        finishBezierPath(false);
+      }
+    });
+
+    // --- Word風 手動トリミング枠の計算・描画 ---
+    function updateCropOverlayUI() {
+      const { x, y, w, h } = cropRect;
+      // 4方向の暗幕
+      const top = document.getElementById('crop-shade-top');
+      const bottom = document.getElementById('crop-shade-bottom');
+      const left = document.getElementById('crop-shade-left');
+      const right = document.getElementById('crop-shade-right');
+
+      top.setAttribute('x', 0); top.setAttribute('y', 0);
+      top.setAttribute('width', 800); top.setAttribute('height', Math.max(0, y));
+
+      bottom.setAttribute('x', 0); bottom.setAttribute('y', y + h);
+      bottom.setAttribute('width', 800); bottom.setAttribute('height', Math.max(0, 600 - (y + h)));
+
+      left.setAttribute('x', 0); left.setAttribute('y', y);
+      left.setAttribute('width', Math.max(0, x)); left.setAttribute('height', h);
+
+      right.setAttribute('x', x + w); right.setAttribute('y', y);
+      right.setAttribute('width', Math.max(0, 800 - (x + w))); right.setAttribute('height', h);
+
+      const box = document.getElementById('crop-box-rect');
+      box.setAttribute('x', x); box.setAttribute('y', y);
+      box.setAttribute('width', w); box.setAttribute('height', h);
+
+      // 三分割グリッド
+      const grid = document.getElementById('crop-grid-lines');
+      const gx1 = x + w / 3, gx2 = x + (w * 2) / 3;
+      const gy1 = y + h / 3, gy2 = y + (h * 2) / 3;
+      grid.setAttribute('d', `M ${gx1} ${y} V ${y + h} M ${gx2} ${y} V ${y + h} M ${x} ${gy1} H ${x + w} M ${x} ${gy2} H ${x + w}`);
+
+      // Word風の黒いL字・I字マークの描画
+      const L = 16; // L字の長さ
+      const M = 10; // 中央バーの半長
+      const cx = x + w / 2, cy = y + h / 2;
+      const marksD = [
+        // 四隅のL字
+        `M ${x} ${y + L} V ${y} H ${x + L}`,
+        `M ${x + w - L} ${y} H ${x + w} V ${y + L}`,
+        `M ${x} ${y + h - L} V ${y + h} H ${x + L}`,
+        `M ${x + w - L} ${y + h} H ${x + w} V ${y + h - L}`,
+        // 上下左右中央のI字バー
+        `M ${cx - M} ${y} H ${cx + M}`,
+        `M ${cx - M} ${y + h} H ${cx + M}`,
+        `M ${x} ${cy - M} V ${cy + M}`,
+        `M ${x + w} ${cy - M} V ${cy + M}`
+      ].join(' ');
+      document.getElementById('crop-visual-marks').setAttribute('d', marksD);
+
+      // ハンドルの当たり判定配置
+      const posMap = {
+        nw: [x - 12, y - 12],
+        ne: [x + w - 12, y - 12],
+        sw: [x - 12, y + h - 12],
+        se: [x + w - 12, y + h - 12],
+        n:  [cx - 16, y - 9],
+        s:  [cx - 16, y + h - 9],
+        w:  [x - 9, cy - 16],
+        e:  [x + w - 9, cy - 16]
+      };
+      document.querySelectorAll('#crop-handles-layer .crop-handle').forEach(el => {
+        const key = el.getAttribute('data-handle');
+        if (posMap[key]) {
+          el.setAttribute('x', posMap[key][0]);
+          el.setAttribute('y', posMap[key][1]);
+        }
+      });
+
+      document.getElementById('crop-size-Readout').textContent = `${Math.round(w)} × ${Math.round(h)}`;
+    }
+
+    function fitCropToDrawing(silent = false) {
+      const pad = parseInt(document.getElementById('opt-padding').value, 10) || 10;
+      if (mainGroup.children.length > 0) {
+        try {
+          const bbox = mainGroup.getBBox();
+          if (bbox.width > 0 && bbox.height > 0) {
+            cropRect.x = Math.max(0, Math.floor(bbox.x - pad));
+            cropRect.y = Math.max(0, Math.floor(bbox.y - pad));
+            cropRect.w = Math.min(800 - cropRect.x, Math.ceil(bbox.width + pad * 2));
+            cropRect.h = Math.min(600 - cropRect.y, Math.ceil(bbox.height + pad * 2));
+            hasCustomCrop = true;
+            updateCropOverlayUI();
+            if (!silent) showToast('描画範囲にトリミング枠を合わせました');
+            return;
+          }
+        } catch (e) {}
+      }
+      cropRect = { x: 60, y: 50, w: 680, h: 500 };
+      updateCropOverlayUI();
+    }
+
+    function resetCropToFull() {
+      cropRect = { x: 0, y: 0, w: 800, h: 600 };
+      hasCustomCrop = true;
+      updateCropOverlayUI();
+      showToast('トリミング枠をキャンバス全体に戻しました');
+    }
+
+    function onTrimModeSelect(mode, switchTool = true) {
+      const padBox = document.getElementById('padding-setting-box');
+      if (mode === 'auto') {
+        padBox.classList.remove('opacity-40', 'pointer-events-none');
+      } else {
+        padBox.classList.add('opacity-40', 'pointer-events-none');
+      }
+      if (mode === 'manual' && switchTool) {
+        setTool('crop');
+      }
+    }
+
+    function toggleSidebar() {
+      const panel = document.getElementById('side-panel');
+      panel.classList.toggle('hidden');
+    }
+
+    // --- 座標変換 (クライアント座標 -> SVG内部座標 800x600) ---
+    // CSS Transform (scale) 適用後も、getBoundingClientRectは実ピクセルサイズを返すので
+    // スケール率を意識せずそのまま割合で計算できる
+    function getSVGPoint(e) {
+      const rect = svgEl.getBoundingClientRect();
+      const scaleX = 800 / rect.width;
+      const scaleY = 600 / rect.height;
+      return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+      };
+    }
+
+    // --- キャンバス ズーム機能 ---
+    function zoomCanvas(delta) {
+      currentZoom += delta;
+      if (currentZoom < 0.2) currentZoom = 0.2;
+      if (currentZoom > 5.0) currentZoom = 5.0;
+      applyZoom();
+    }
+    
+    function resetZoom() {
+      currentZoom = 1.0;
+      applyZoom();
+    }
+
+    function applyZoom() {
+      boardContainer.style.transform = `scale(${currentZoom.toFixed(2)})`;
+      document.getElementById('zoom-level-text').textContent = `${Math.round(currentZoom * 100)}%`;
+    }
+
+    // --- ポインターイベント処理 (描画・消しゴム・スポイト・色変更・図形・選択) ---
+    svgEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      svgEl.setPointerCapture(e.pointerId);
+      isPointerDown = true;
+      const pt = getSVGPoint(e);
+      startPos = { x: pt.x, y: pt.y };
+
+      // 0. 手動トリミング（Word風ハンドル操作）
+      if (currentTool === 'crop') {
+        const target = e.target;
+        const handleType = target.getAttribute && target.getAttribute('data-handle');
+        if (handleType) {
+          activeCropHandle = handleType;
+        } else if (target.id === 'crop-box-rect' || (pt.x >= cropRect.x && pt.x <= cropRect.x + cropRect.w && pt.y >= cropRect.y && pt.y <= cropRect.y + cropRect.h)) {
+          activeCropHandle = 'move';
+        } else {
+          // 枠外をドラッグしたら新しくトリミング枠を引き直す
+          activeCropHandle = 'new';
+          cropRect = { x: pt.x, y: pt.y, w: 1, h: 1 };
+        }
+        cropStartRect = { ...cropRect };
+        hasCustomCrop = true;
+        return;
+      }
+
+      // 1. スポイトツール
+      if (currentTool === 'eyedropper') {
+        pickColorAt(pt);
+        isPointerDown = false;
+        return;
+      }
+
+      // 2. パス消しゴムツール（クリックした時点でも即座に消去）
+      if (currentTool === 'eraser') {
+        erasePathAtEvent(e);
+        return;
+      }
+
+      // 3. 色変更（線・塗りの個別反映）ツール
+      if (currentTool === 'recolor') {
+        recolorPathAtEvent(e);
+        isPointerDown = false;
+        return;
+      }
+      
+      // 空間の塗りつぶしツール
+      if (currentTool === 'bucket') {
+        isPointerDown = false;
+        executeBucketFill(pt);
+        return;
+      }
+
+      // 4A. Illustrator風 ベジェ曲線ペンツール
+      if (currentTool === 'bezier') {
+        const bNodeAttr = e.target.getAttribute && e.target.getAttribute('data-bnode');
+        const bPartAttr = e.target.getAttribute && e.target.getAttribute('data-bpart');
+
+        // 始点アンカーをクリックした場合はパスを閉じて確定（Altキー押下時は方向線操作を優先）
+        if (isDrawingBezier && bPartAttr === 'anchor' && parseInt(bNodeAttr, 10) === 0 && bezierNodes.length >= 2 && !e.altKey) {
+          finishBezierPath(true);
+          isPointerDown = false;
+          return;
+        }
+
+        // 既存ノードまたはハンドルをクリック・ドラッグする場合
+        if (bNodeAttr !== null && bPartAttr) {
+          const idx = parseInt(bNodeAttr, 10);
+          activeBezierNodeIdx = idx;
+          updateNodeActionButtonsUI();
+          draggingBezierNodeIdx = idx;
+          // Illustrator方式：Altキーを押しながら頂点（角など）をドラッグすると、その頂点から新しい方向線を引き出せる
+          draggingBezierPart = (bPartAttr === 'anchor' && e.altKey) ? 'newOut' : bPartAttr;
+          renderBezierEditorOverlay();
+          return;
+        }
+
+        // 描画中のベジェ曲線の上をクリックした場合は、その位置にアンカーポイントを追加
+        if (isDrawingBezier && bezierNodes.length >= 2) {
+          const insertedIdx = insertBezierNodeAtPoint(pt, 9);
+          if (insertedIdx >= 0) {
+            activeBezierNodeIdx = insertedIdx;
+            draggingBezierNodeIdx = insertedIdx;
+            draggingBezierPart = e.altKey ? 'newOut' : 'anchor';
+            updateNodeActionButtonsUI();
+            renderBezierEditorOverlay();
+            showToast('曲線上にアンカーポイントを追加しました');
+            return;
+          }
+        }
+
+        // すでに単一頂点選択モードだった場合、空白クリックでまず全頂点表示に戻す
+        activeBezierNodeIdx = -1;
+        updateNodeActionButtonsUI();
+
+        // 新しいアンカーポイントを追加し、ドラッグで方向線を引き出せるようにする
+        isDrawingBezier = true;
+        const newNode = { x: pt.x, y: pt.y, inX: pt.x, inY: pt.y, outX: pt.x, outY: pt.y };
+        bezierNodes.push(newNode);
+        draggingBezierNodeIdx = bezierNodes.length - 1;
+        draggingBezierPart = 'newOut';
+        renderBezierEditorOverlay();
+        return;
+      }
+
+      // 4B. アンカーポイント・カーブ編集（ノードツール）
+      if (currentTool === 'node') {
+        const bNodeAttr = e.target.getAttribute && e.target.getAttribute('data-bnode');
+        const bPartAttr = e.target.getAttribute && e.target.getAttribute('data-bpart');
+
+        // 1) 頂点または方向線ハンドルを掴んだ場合
+        if (bNodeAttr !== null && bPartAttr && editingPathElement) {
+          const idx = parseInt(bNodeAttr, 10);
+          // 1つ頂点を選択したら、その頂点だけをアクティブにして他の頂点と方向線の表示を消す
+          activeBezierNodeIdx = idx;
+          updateNodeActionButtonsUI();
+          draggingBezierNodeIdx = idx;
+          // Illustrator方式：Altキーを押しながら頂点（角など）をドラッグすると、新しく方向線を引き出せる
+          draggingBezierPart = (bPartAttr === 'anchor' && e.altKey) ? 'newOut' : bPartAttr;
+          renderBezierEditorOverlay();
+          return;
+        }
+
+        // 2) 現在編集中のパスの「線の上」をクリックした場合 → その位置に新しいアンカーポイントを追加！
+        if (editingPathElement) {
+          const hitThreshold = Math.max(10, (parseFloat(editingPathElement.getAttribute('stroke-width') || 5) / 2) + 6);
+          const insertedIdx = insertBezierNodeAtPoint(pt, hitThreshold);
+          if (insertedIdx >= 0) {
+            activeBezierNodeIdx = insertedIdx;
+            draggingBezierNodeIdx = insertedIdx;
+            draggingBezierPart = e.altKey ? 'newOut' : 'anchor';
+            updateNodeActionButtonsUI();
+            renderBezierEditorOverlay();
+            saveHistory();
+            showToast('線上に新しいアンカーポイントを追加しました');
+            return;
+          }
+        }
+
+        // 3) 別のパスをクリックして編集対象を切り替える、または単一頂点選択を解除する
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (target && target.parentElement === mainGroup && target.tagName.toLowerCase() === 'path') {
+          if (target === editingPathElement && activeBezierNodeIdx >= 0) {
+            // 同じパス上だが頂点外をクリックしたときは全頂点表示に戻す
+            deselectActiveBezierNode();
+          } else {
+            clearBezierEditor();
+            bakeElementTransform(target);
+            editingPathElement = target;
+            editingPathElement.classList.add('selected-element');
+            const parsed = parseSVGPathToBezierNodes(target.getAttribute('d') || '');
+            bezierNodes = parsed.nodes;
+            editingPathClosed = parsed.closed;
+            activeBezierNodeIdx = -1;
+            updateNodeActionButtonsUI();
+            renderBezierEditorOverlay();
+            showToast('頂点クリックで単一編集 / 線上クリックで頂点追加 / Alt+ドラッグで角から方向線を引き出せます');
+          }
+        } else {
+          if (activeBezierNodeIdx >= 0) {
+            // 単一頂点表示中に空白をクリックした場合は、まず全頂点表示に戻す
+            deselectActiveBezierNode();
+          } else {
+            clearBezierEditor();
+          }
+        }
+        isPointerDown = false;
+        return;
+      }
+
+      // 4C. 選択 / 複数選択 / 移動 / 拡大縮小ツール
+      if (currentTool === 'select') {
+        const handleAttr = e.target.getAttribute && e.target.getAttribute('data-sel-handle');
+        if (handleAttr && selectedElements.length > 0) {
+          selectionAction = 'resize';
+          activeResizeHandle = handleAttr;
+          selectionInitialBBox = getCombinedSelectionBBox();
+          selectionSnapshots = selectedElements.map(el => captureElementGeometry(el));
+          return;
+        }
+
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (target && target.parentElement === mainGroup) {
+          if (e.shiftKey) {
+            selectElementForEdit(target, true);
+          } else if (!selectedElements.includes(target)) {
+            selectElementForEdit(target, false);
+          }
+          if (selectedElements.length > 0) {
+            selectionAction = 'move';
+            selectionInitialBBox = getCombinedSelectionBBox();
+            selectionSnapshots = selectedElements.map(el => captureElementGeometry(el));
+          }
+        } else if (e.target.id === 'sel-bbox-rect' && selectedElements.length > 0) {
+          selectionAction = 'move';
+          selectionInitialBBox = getCombinedSelectionBBox();
+          selectionSnapshots = selectedElements.map(el => captureElementGeometry(el));
+        } else {
+          if (!e.shiftKey) clearElementSelection();
+          selectionAction = 'marquee';
+          const mq = document.getElementById('marquee-select-rect');
+          mq.setAttribute('x', pt.x);
+          mq.setAttribute('y', pt.y);
+          mq.setAttribute('width', 0);
+          mq.setAttribute('height', 0);
+          mq.classList.remove('hidden');
+        }
+        return;
+      }
+
+      // 5. 図形描画 (矩形, 円, 直線)
+      if (['rect', 'circle', 'line'].includes(currentTool)) {
+        previewRect.classList.add('hidden');
+        previewCircle.classList.add('hidden');
+        previewLine.classList.add('hidden');
+        return;
+      }
+
+      // 6. ペン または 閉じて塗る または 部分消しゴム
+      brushPos = { x: pt.x, y: pt.y };
+      pointerPos = { x: pt.x, y: pt.y };
+      rawPoints = [{ x: pt.x, y: pt.y }];
+
+      if (currentTool === 'eraser-partial') {
+        activeStrokePath.setAttribute('stroke', 'black');
+        activeStrokePath.setAttribute('stroke-width', currentWidth);
+        activeStrokePath.setAttribute('fill', 'none');
+        activeStrokePath.removeAttribute('fill-opacity');
+      } else {
+        activeStrokePath.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+        activeStrokePath.setAttribute('stroke-width', currentWidth);
+        if (currentTool === 'fillpen' || isFillEnabled) {
+          const fCol = currentTool === 'fillpen' ? (isFillEnabled ? currentFillColor : currentColor) : currentFillColor;
+          activeStrokePath.setAttribute('fill', fCol);
+          activeStrokePath.setAttribute('fill-opacity', '0.35');
+        } else {
+          activeStrokePath.setAttribute('fill', 'none');
+          activeStrokePath.removeAttribute('fill-opacity');
+        }
+      }
+
+      activeStrokePath.setAttribute('d', `M ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`);
+
+      if (stabilizerLevel > 0) {
+        lazyBrushDot.setAttribute('cx', pt.x);
+        lazyBrushDot.setAttribute('cy', pt.y);
+        lazyBrushDot.classList.remove('hidden');
+        lazyStringLine.setAttribute('x1', pt.x);
+        lazyStringLine.setAttribute('y1', pt.y);
+        lazyStringLine.setAttribute('x2', pt.x);
+        lazyStringLine.setAttribute('y2', pt.y);
+        lazyStringLine.classList.remove('hidden');
+      }
+    });
+
+    svgEl.addEventListener('pointermove', (e) => {
+      const pt = getSVGPoint(e);
+
+      // ベジェ曲線ペン描画中：マウス移動時に次の頂点へのゴムバンド曲線をプレビュー表示
+      if (!isPointerDown && currentTool === 'bezier' && isDrawingBezier && bezierNodes.length > 0) {
+        const last = bezierNodes[bezierNodes.length - 1];
+        const rubber = document.getElementById('bezier-rubber-path');
+        rubber.setAttribute('d', `M ${last.x.toFixed(1)} ${last.y.toFixed(1)} C ${last.outX.toFixed(1)} ${last.outY.toFixed(1)} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`);
+        return;
+      }
+
+      if (!isPointerDown) return;
+
+      // ベジェ曲線ペン または ノード編集のハンドル・頂点ドラッグ処理
+      if ((currentTool === 'bezier' || currentTool === 'node') && draggingBezierNodeIdx >= 0) {
+        const node = bezierNodes[draggingBezierNodeIdx];
+        if (!node) return;
+        if (draggingBezierPart === 'newOut') {
+          // ドラッグした方向へoutハンドルを伸ばし、反対側に対称なinハンドルを作る（Illustrator標準挙動）
+          node.outX = pt.x;
+          node.outY = pt.y;
+          node.inX = node.x - (pt.x - node.x);
+          node.inY = node.y - (pt.y - node.y);
+        } else if (draggingBezierPart === 'anchor') {
+          const dx = pt.x - node.x;
+          const dy = pt.y - node.y;
+          node.x = pt.x;
+          node.y = pt.y;
+          node.inX += dx;
+          node.inY += dy;
+          node.outX += dx;
+          node.outY += dy;
+        } else if (draggingBezierPart === 'out') {
+          node.outX = pt.x;
+          node.outY = pt.y;
+          if (!e.altKey) {
+            // Altキーを押していない場合は反対側のハンドルも角度を連動させて滑らかな曲線を保つ
+            const lenIn = Math.hypot(node.inX - node.x, node.inY - node.y);
+            const lenOut = Math.hypot(node.outX - node.x, node.outY - node.y);
+            if (lenOut > 0.5 && lenIn > 0.5) {
+              node.inX = node.x - ((node.outX - node.x) / lenOut) * lenIn;
+              node.inY = node.y - ((node.outY - node.y) / lenOut) * lenIn;
+            }
+          }
+        } else if (draggingBezierPart === 'in') {
+          node.inX = pt.x;
+          node.inY = pt.y;
+          if (!e.altKey) {
+            const lenOut = Math.hypot(node.outX - node.x, node.outY - node.y);
+            const lenIn = Math.hypot(node.inX - node.x, node.inY - node.y);
+            if (lenIn > 0.5 && lenOut > 0.5) {
+              node.outX = node.x - ((node.inX - node.x) / lenIn) * lenOut;
+              node.outY = node.y - ((node.inY - node.y) / lenIn) * lenOut;
+            }
+          }
+        }
+        renderBezierEditorOverlay();
+        return;
+      }
+
+      // 手動トリミング枠のドラッグ変形
+      if (currentTool === 'crop' && activeCropHandle && cropStartRect) {
+        const dx = pt.x - startPos.x;
+        const dy = pt.y - startPos.y;
+        const minSize = 20;
+        let { x, y, w, h } = cropStartRect;
+
+        if (activeCropHandle === 'move') {
+          x = Math.max(0, Math.min(800 - w, x + dx));
+          y = Math.max(0, Math.min(600 - h, y + dy));
+        } else if (activeCropHandle === 'new') {
+          x = Math.max(0, Math.min(startPos.x, pt.x));
+          y = Math.max(0, Math.min(startPos.y, pt.y));
+          w = Math.max(minSize, Math.abs(pt.x - startPos.x));
+          h = Math.max(minSize, Math.abs(pt.y - startPos.y));
+        } else {
+          if (activeCropHandle.includes('w')) {
+            const newX = Math.max(0, Math.min(x + w - minSize, x + dx));
+            w = (x + w) - newX;
+            x = newX;
+          }
+          if (activeCropHandle.includes('e')) {
+            w = Math.max(minSize, Math.min(800 - x, w + dx));
+          }
+          if (activeCropHandle.includes('n')) {
+            const newY = Math.max(0, Math.min(y + h - minSize, y + dy));
+            h = (y + h) - newY;
+            y = newY;
+          }
+          if (activeCropHandle.includes('s')) {
+            h = Math.max(minSize, Math.min(600 - y, h + dy));
+          }
+        }
+        cropRect = { x, y, w, h };
+        updateCropOverlayUI();
+        return;
+      }
+
+      // 選択要素の移動・拡大縮小・ドラッグ枠選択
+      if (currentTool === 'select' && selectionAction) {
+        const dx = pt.x - startPos.x;
+        const dy = pt.y - startPos.y;
+
+        if (selectionAction === 'move' && selectionInitialBBox) {
+          const newBox = {
+            x: selectionInitialBBox.x + dx,
+            y: selectionInitialBBox.y + dy,
+            w: selectionInitialBBox.w,
+            h: selectionInitialBBox.h
+          };
+          selectedElements.forEach((el, idx) => {
+            transformElementGeometry(el, selectionSnapshots[idx], selectionInitialBBox, newBox);
+          });
+          updateSelectionTransformBox(newBox);
+        } else if (selectionAction === 'resize' && selectionInitialBBox && activeResizeHandle) {
+          let { x, y, w, h } = selectionInitialBBox;
+          const minS = 10;
+          if (activeResizeHandle.includes('w')) {
+            const nx = Math.min(x + w - minS, x + dx);
+            w = (x + w) - nx;
+            x = nx;
+          }
+          if (activeResizeHandle.includes('e')) {
+            w = Math.max(minS, w + dx);
+          }
+          if (activeResizeHandle.includes('n')) {
+            const ny = Math.min(y + h - minS, y + dy);
+            h = (y + h) - ny;
+            y = ny;
+          }
+          if (activeResizeHandle.includes('s')) {
+            h = Math.max(minS, h + dy);
+          }
+          // Shiftキーを押しながら角ハンドルをドラッグしたときは縦横比を維持
+          if (e.shiftKey && activeResizeHandle.length === 2 && selectionInitialBBox.h > 0) {
+            const ratio = selectionInitialBBox.w / selectionInitialBBox.h;
+            h = Math.max(minS, w / ratio);
+          }
+          const newBox = { x, y, w, h };
+          selectedElements.forEach((el, idx) => {
+            transformElementGeometry(el, selectionSnapshots[idx], selectionInitialBBox, newBox);
+          });
+          updateSelectionTransformBox(newBox);
+        } else if (selectionAction === 'marquee') {
+          const mq = document.getElementById('marquee-select-rect');
+          mq.setAttribute('x', Math.min(startPos.x, pt.x));
+          mq.setAttribute('y', Math.min(startPos.y, pt.y));
+          mq.setAttribute('width', Math.abs(pt.x - startPos.x));
+          mq.setAttribute('height', Math.abs(pt.y - startPos.y));
+        }
+        return;
+      }
+
+      // 図形描画のプレビュー更新（線と塗りの両方を反映）
+      if (['rect', 'circle', 'line'].includes(currentTool)) {
+        const stCol = isStrokeEnabled ? currentColor : 'none';
+        const flCol = isFillEnabled ? currentFillColor : 'none';
+        if (currentTool === 'rect') {
+          previewRect.classList.remove('hidden');
+          previewRect.setAttribute('stroke', stCol);
+          previewRect.setAttribute('stroke-width', currentWidth);
+          previewRect.setAttribute('fill', flCol);
+          previewRect.setAttribute('x', Math.min(startPos.x, pt.x));
+          previewRect.setAttribute('y', Math.min(startPos.y, pt.y));
+          previewRect.setAttribute('width', Math.abs(pt.x - startPos.x));
+          previewRect.setAttribute('height', Math.abs(pt.y - startPos.y));
+        } else if (currentTool === 'circle') {
+          previewCircle.classList.remove('hidden');
+          previewCircle.setAttribute('stroke', stCol);
+          previewCircle.setAttribute('stroke-width', currentWidth);
+          previewCircle.setAttribute('fill', flCol);
+          const r = Math.hypot(pt.x - startPos.x, pt.y - startPos.y);
+          previewCircle.setAttribute('cx', startPos.x);
+          previewCircle.setAttribute('cy', startPos.y);
+          previewCircle.setAttribute('r', r);
+        } else if (currentTool === 'line') {
+          previewLine.classList.remove('hidden');
+          previewLine.setAttribute('stroke', isStrokeEnabled ? currentColor : currentFillColor);
+          previewLine.setAttribute('stroke-width', currentWidth);
+          previewLine.setAttribute('stroke-linecap', 'round');
+          previewLine.setAttribute('x1', startPos.x);
+          previewLine.setAttribute('y1', startPos.y);
+          previewLine.setAttribute('x2', pt.x);
+          previewLine.setAttribute('y2', pt.y);
+        }
+        return;
+      }
+
+      if (currentTool === 'eraser') {
+        erasePathAtEvent(e);
+        return;
+      }
+
+      if (currentTool !== 'pen' && currentTool !== 'fillpen' && currentTool !== 'eraser-partial') return;
+
+      pointerPos = pt;
+
+      // 手ブレ補正 (Lazy Brush 追従計算)
+      if (stabilizerLevel > 0) {
+        // 補正強度に応じた追従係数 (0.15 〜 0.85)
+        const alpha = Math.max(0.12, 1 - stabilizerLevel * 0.07);
+        const dx = pt.x - brushPos.x;
+        const dy = pt.y - brushPos.y;
+        const dist = Math.hypot(dx, dy);
+
+        // 一定距離以上動いたときのみ座標を追加
+        if (dist > 1.5) {
+          brushPos.x += dx * alpha;
+          brushPos.y += dy * alpha;
+          rawPoints.push({ x: brushPos.x, y: brushPos.y });
+        }
+
+        lazyBrushDot.setAttribute('cx', brushPos.x);
+        lazyBrushDot.setAttribute('cy', brushPos.y);
+        lazyStringLine.setAttribute('x1', brushPos.x);
+        lazyStringLine.setAttribute('y1', brushPos.y);
+        lazyStringLine.setAttribute('x2', pointerPos.x);
+        lazyStringLine.setAttribute('y2', pointerPos.y);
+      } else {
+        rawPoints.push(pt);
+      }
+
+      // リアルタイム曲線プレビュー更新
+      const d = buildSmoothSVGPath(rawPoints, currentTool === 'fillpen');
+      activeStrokePath.setAttribute('d', d);
+    });
+
+    svgEl.addEventListener('pointerup', (e) => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      lazyBrushDot.classList.add('hidden');
+      lazyStringLine.classList.add('hidden');
+
+      if (currentTool === 'bezier' || currentTool === 'node') {
+        if (currentTool === 'node' && draggingBezierNodeIdx >= 0 && editingPathElement) {
+          saveHistory();
+        }
+        draggingBezierNodeIdx = -1;
+        draggingBezierPart = null;
+        return;
+      }
+
+      if (currentTool === 'crop') {
+        activeCropHandle = null;
+        cropStartRect = null;
+        return;
+      }
+
+      if (currentTool === 'select') {
+        if (selectionAction === 'marquee') {
+          const mq = document.getElementById('marquee-select-rect');
+          const mx = parseFloat(mq.getAttribute('x') || 0);
+          const my = parseFloat(mq.getAttribute('y') || 0);
+          const mw = parseFloat(mq.getAttribute('width') || 0);
+          const mh = parseFloat(mq.getAttribute('height') || 0);
+          mq.classList.add('hidden');
+          if (mw > 4 && mh > 4) {
+            Array.from(mainGroup.children).forEach(el => {
+              try {
+                bakeElementTransform(el);
+                const b = el.getBBox();
+                const intersects = !(b.x > mx + mw || b.x + b.width < mx || b.y > my + mh || b.y + b.height < my);
+                if (intersects && !selectedElements.includes(el)) {
+                  el.classList.add('selected-element');
+                  selectedElements.push(el);
+                }
+              } catch (err) {}
+            });
+            selectedElement = selectedElements[0] || null;
+            updateSelectionTransformBox();
+            updateClipboardButtons();
+          }
+        } else if (selectionAction === 'move' || selectionAction === 'resize') {
+          updateSelectionTransformBox();
+          saveHistory();
+        }
+        selectionAction = null;
+        activeResizeHandle = null;
+        return;
+      }
+
+      // 図形の確定と追加（線色・塗色を個別適用）
+      if (['rect', 'circle', 'line'].includes(currentTool)) {
+        let el = null;
+        if (currentTool === 'rect' && !previewRect.classList.contains('hidden')) {
+          el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          el.setAttribute('x', previewRect.getAttribute('x'));
+          el.setAttribute('y', previewRect.getAttribute('y'));
+          el.setAttribute('width', previewRect.getAttribute('width'));
+          el.setAttribute('height', previewRect.getAttribute('height'));
+          previewRect.classList.add('hidden');
+        } else if (currentTool === 'circle' && !previewCircle.classList.contains('hidden')) {
+          el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          el.setAttribute('cx', previewCircle.getAttribute('cx'));
+          el.setAttribute('cy', previewCircle.getAttribute('cy'));
+          el.setAttribute('r', previewCircle.getAttribute('r'));
+          previewCircle.classList.add('hidden');
+        } else if (currentTool === 'line' && !previewLine.classList.contains('hidden')) {
+          el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          el.setAttribute('x1', previewLine.getAttribute('x1'));
+          el.setAttribute('y1', previewLine.getAttribute('y1'));
+          el.setAttribute('x2', previewLine.getAttribute('x2'));
+          el.setAttribute('y2', previewLine.getAttribute('y2'));
+          el.setAttribute('stroke-linecap', 'round');
+          previewLine.classList.add('hidden');
+        }
+
+        if (el) {
+          if (currentTool === 'line') {
+            el.setAttribute('stroke', isStrokeEnabled ? currentColor : currentFillColor);
+            el.setAttribute('stroke-width', currentWidth);
+            el.setAttribute('fill', 'none');
+          } else {
+            el.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+            el.setAttribute('stroke-width', currentWidth);
+            el.setAttribute('fill', isFillEnabled ? currentFillColor : 'none');
+          }
+          mainGroup.appendChild(el);
+          saveHistory();
+        }
+        return;
+      }
+
+      if (currentTool === 'eraser') {
+        saveHistory();
+        return;
+      }
+
+      if (currentTool !== 'pen' && currentTool !== 'fillpen' && currentTool !== 'eraser-partial') return;
+
+      // ジャギーをなくすための複数回移動平均平滑化
+      let finalPoints = rawPoints;
+      if (simplifyTolerance > 0 && rawPoints.length > 3) {
+        const passes = Math.ceil(simplifyTolerance * 2); // 調整スライダーの値で平滑化の強度を上げる
+        for (let iter = 0; iter < passes; iter++) {
+          const smoothed = [finalPoints[0]];
+          for (let i = 1; i < finalPoints.length - 1; i++) {
+            smoothed.push({
+              x: (finalPoints[i - 1].x + finalPoints[i].x + finalPoints[i + 1].x) / 3,
+              y: (finalPoints[i - 1].y + finalPoints[i].y + finalPoints[i + 1].y) / 3
+            });
+          }
+          smoothed.push(finalPoints[finalPoints.length - 1]);
+          finalPoints = smoothed;
+        }
+        
+        // その後にRDPによる頂点間引きでデータ量を削減しつつ滑らかに
+        finalPoints = simplifyPointsRDP(finalPoints, simplifyTolerance * 0.4);
+      }
+
+      const isClosed = (currentTool === 'fillpen');
+      const d = buildSmoothSVGPath(finalPoints, isClosed);
+
+      if (d) {
+        const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        newPath.setAttribute('d', d);
+        newPath.setAttribute('stroke-width', currentWidth);
+        
+        if (currentTool === 'eraser-partial') {
+          // 部分消しゴムの軌跡はマスク用の別グループに追加する
+          newPath.setAttribute('stroke', 'black');
+          newPath.setAttribute('fill', 'none');
+          eraserStrokesGroup.appendChild(newPath);
+        } else if (currentTool === 'fillpen') {
+          const fCol = isFillEnabled ? currentFillColor : currentColor;
+          newPath.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+          newPath.setAttribute('fill', fCol);
+          mainGroup.appendChild(newPath);
+        } else {
+          newPath.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+          newPath.setAttribute('fill', isFillEnabled ? currentFillColor : 'none');
+          mainGroup.appendChild(newPath);
+        }
+        saveHistory();
+      }
+
+      activeStrokePath.setAttribute('d', '');
+      rawPoints = [];
+    });
+
+    // --- 二次ベジェ曲線（Qコマンド）による滑らかなSVGパス構築 ---
+    function buildSmoothSVGPath(points, closePath = false) {
+      if (!points || points.length === 0) return '';
+      if (points.length === 1) {
+        const p = points[0];
+        return `M ${p.x.toFixed(1)} ${p.y.toFixed(1)} L ${(p.x + 0.1).toFixed(1)} ${p.y.toFixed(1)}`;
+      }
+
+      let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+      for (let i = 1; i < points.length - 1; i++) {
+        const midX = (points[i].x + points[i + 1].x) / 2;
+        const midY = (points[i].y + points[i + 1].y) / 2;
+        d += ` Q ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+      }
+      const last = points[points.length - 1];
+      d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+      if (closePath) d += ' Z';
+      return d;
+    }
+
+    // --- Ramer-Douglas-Peucker (RDP) 頂点間引きアルゴリズム ---
+    function simplifyPointsRDP(points, epsilon) {
+      if (points.length <= 2) return points;
+      let dmax = 0;
+      let index = 0;
+      const end = points.length - 1;
+
+      for (let i = 1; i < end; i++) {
+        const d = perpendicularDistance(points[i], points[0], points[end]);
+        if (d > dmax) {
+          index = i;
+          dmax = d;
+        }
+      }
+
+      if (dmax > epsilon) {
+        const recResults1 = simplifyPointsRDP(points.slice(0, index + 1), epsilon);
+        const recResults2 = simplifyPointsRDP(points.slice(index, end + 1), epsilon);
+        return recResults1.slice(0, recResults1.length - 1).concat(recResults2);
+      } else {
+        return [points[0], points[end]];
+      }
+    }
+
+    function perpendicularDistance(pt, lineStart, lineEnd) {
+      let dx = lineEnd.x - lineStart.x;
+      let dy = lineEnd.y - lineStart.y;
+      const mag = Math.hypot(dx, dy);
+      if (mag > 0) {
+        dx /= mag;
+        dy /= mag;
+      }
+      const pvx = pt.x - lineStart.x;
+      const pvy = pt.y - lineStart.y;
+      const pvdot = dx * pvx + dy * pvy;
+      const ax = pvx - pvdot * dx;
+      const ay = pvy - pvdot * dy;
+      return Math.hypot(ax, ay);
+    }
+
+    // --- パス消しゴム・色変更・スポイト処理 ---
+    function erasePathAtEvent(e) {
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      // 部分消しや描画プレビュー要素は対象外
+      if (target && target.parentElement === mainGroup) {
+        target.remove();
+        updatePathCount();
+      }
+    }
+
+    function recolorPathAtEvent(e) {
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      if (target && target.parentElement === mainGroup) {
+        if (target.tagName === 'line') {
+          target.setAttribute('stroke', currentColor);
+        } else {
+          target.setAttribute('stroke', isStrokeEnabled ? currentColor : 'none');
+          target.setAttribute('fill', isFillEnabled ? currentFillColor : (isStrokeEnabled ? target.getAttribute('fill') || 'none' : currentFillColor));
+        }
+        saveHistory();
+        showToast('要素の線色・塗色を変更しました');
+      }
+    }
+
+    function pickColorAt(pt) {
+      if (!hasUnderlay) {
+        showToast('下絵が読み込まれていません');
+        return;
+      }
+      const x = Math.max(0, Math.min(799, Math.floor(pt.x)));
+      const y = Math.max(0, Math.min(599, Math.floor(pt.y)));
+      // 白黒プレビュー中であっても元画像から本当の色を吸い取れるようにoriginalUnderlayCtxを参照
+      const pixel = originalUnderlayCtx.getImageData(x, y, 1, 1).data;
+      if (pixel[3] === 0) {
+        showToast('透明な領域です');
+        return;
+      }
+      const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+      setQuickColor(hex);
+      showToast(`色を吸い取りました (${hex})`);
+    }
+
+    // --- 下絵画像の読み込みと描画（Undo履歴と分離して保持） ---
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (file) loadImageFile(file);
+    }
+
+    function loadImageFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          drawUnderlayImage(img);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function drawUnderlayImage(img) {
+      originalUnderlayCtx.clearRect(0, 0, 800, 600);
+      // アスペクト比を維持して800x600の中央にフィット配置
+      const scale = Math.min(800 / img.width, 600 / img.height) * 0.9;
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const x = (800 - w) / 2;
+      const y = (600 - h) / 2;
+      originalUnderlayCtx.drawImage(img, x, y, w, h);
+
+      hasUnderlay = true;
+      isUnderlayVisible = true;
+      underlayCanvas.classList.remove('hidden');
+      const btn = document.getElementById('btn-toggle-underlay');
+      btn.textContent = '表示中';
+      btn.className = 'px-2.5 py-1 rounded bg-indigo-600 text-xs font-medium text-white';
+
+      document.getElementById('underlay-controls').classList.remove('opacity-50', 'pointer-events-none');
+      document.getElementById('autotrace-controls').classList.remove('opacity-50', 'pointer-events-none');
+
+      // 表示用Canvasを更新（白黒モードならリアルタイムプレビュー反映）
+      updateUnderlayDisplay();
+      showToast('下絵を読み込みました！Undoしても下絵は消えません');
+    }
+
+    // 白黒しきい値のスライダー操作時にリアルタイムで下絵を二値化プレビュー
+    function onThresholdSlide(val) {
+      document.getElementById('threshold-val').textContent = val;
+      updateUnderlayDisplay();
+    }
+
+    function updateUnderlayDisplay() {
+      if (!hasUnderlay) return;
+      const mode = document.getElementById('trace-mode').value;
+      const livePreview = document.getElementById('bw-live-preview').checked;
+
+      underlayCtx.clearRect(0, 0, 800, 600);
+
+      if (mode === 'bw' && livePreview) {
+        const threshold = parseInt(document.getElementById('trace-threshold').value, 10);
+        const srcData = originalUnderlayCtx.getImageData(0, 0, 800, 600);
+        const data = srcData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 20) continue; // 元々透明な領域はそのまま
+          const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          if (lum < threshold) {
+            data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255;
+          } else {
+            data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 200;
+          }
+        }
+        underlayCtx.putImageData(srcData, 0, 0);
+      } else {
+        underlayCtx.drawImage(originalUnderlayCanvas, 0, 0);
+      }
+    }
+
+    function toggleUnderlay() {
+      if (!hasUnderlay) return;
+      isUnderlayVisible = !isUnderlayVisible;
+      const btn = document.getElementById('btn-toggle-underlay');
+      if (isUnderlayVisible) {
+        underlayCanvas.classList.remove('hidden');
+        btn.textContent = '表示中';
+        btn.className = 'px-2.5 py-1 rounded bg-indigo-600 text-xs font-medium text-white';
+      } else {
+        underlayCanvas.classList.add('hidden');
+        btn.textContent = '非表示';
+        btn.className = 'px-2.5 py-1 rounded bg-slate-700 text-xs font-medium text-slate-300';
+      }
+    }
+
+    function updateUnderlayOpacity(val) {
+      document.getElementById('opacity-val').textContent = `${val}%`;
+      underlayCanvas.style.opacity = (val / 100).toFixed(2);
+    }
+
+    // すぐに試せるサンプル下絵の生成
+    function loadSampleImage() {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = 800;
+      tempCanvas.height = 600;
+      const ctx = tempCanvas.getContext('2d');
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 800, 600);
+
+      // カラフルなスライム風キャラクターのサンプル下絵を描画
+      ctx.save();
+      ctx.translate(400, 320);
+
+      ctx.beginPath();
+      ctx.moveTo(0, -190);
+      ctx.bezierCurveTo(35, -130, 50, -80, 120, -40);
+      ctx.bezierCurveTo(210, 10, 220, 130, 130, 180);
+      ctx.bezierCurveTo(60, 215, -60, 215, -130, 180);
+      ctx.bezierCurveTo(-220, 130, -210, 10, -120, -40);
+      ctx.bezierCurveTo(-50, -80, -35, -130, 0, -190);
+      ctx.closePath();
+      ctx.fillStyle = '#38bdf8';
+      ctx.fill();
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = '#0f172a';
+      ctx.stroke();
+
+      // 目
+      [-55, 55].forEach(cx => {
+        ctx.beginPath();
+        ctx.arc(cx, 20, 34, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = '#0f172a';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(cx, 20, 14, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f172a';
+        ctx.fill();
+      });
+
+      // 口
+      ctx.beginPath();
+      ctx.arc(0, 65, 65, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#ef4444';
+      ctx.stroke();
+
+      ctx.restore();
+
+      const img = new Image();
+      img.onload = () => drawUnderlayImage(img);
+      img.src = tempCanvas.toDataURL('image/png');
+    }
+
+    // --- 自動トレース処理 (ImageTracerJS + 実画像カスタムカラーパレット抽出) ---
+    function toggleTraceModeUI() {
+      const mode = document.getElementById('trace-mode').value;
+      document.getElementById('bw-settings').classList.toggle('hidden', mode !== 'bw');
+      document.getElementById('color-settings').classList.toggle('hidden', mode !== 'color');
+      updateUnderlayDisplay();
+    }
+
+    // 元画像のピクセルから実際の色をサンプリングし、写真の色と一致するカスタムパレットを生成する
+    function extractAccuratePaletteFromImage(imgData, numColors) {
+      const data = imgData.data;
+      const samples = [];
+      const step = 4 * 4; // 4ピクセルおきに高速サンプリング
+      for (let i = 0; i < data.length; i += step) {
+        if (data[i + 3] > 128) {
+          samples.push([data[i], data[i + 1], data[i + 2]]);
+        }
+      }
+      if (samples.length === 0) return null;
+
+      // K-Means++ 風の初期セントロイド選択で写真内の代表的な色を偏りなく拾う
+      const centroids = [];
+      centroids.push([...samples[Math.floor(samples.length / 2)]]);
+
+      while (centroids.length < numColors) {
+        let bestSample = samples[0];
+        let maxDist = -1;
+        // 計算量を抑えるためランダム候補から最も遠い色を選ぶ
+        for (let t = 0; t < 60; t++) {
+          const candidate = samples[Math.floor(Math.random() * samples.length)];
+          let minDistToCentroid = Infinity;
+          for (let c = 0; c < centroids.length; c++) {
+            const d = (candidate[0] - centroids[c][0]) ** 2 +
+                      (candidate[1] - centroids[c][1]) ** 2 +
+                      (candidate[2] - centroids[c][2]) ** 2;
+            if (d < minDistToCentroid) minDistToCentroid = d;
+          }
+          if (minDistToCentroid > maxDist) {
+            maxDist = minDistToCentroid;
+            bestSample = candidate;
+          }
+        }
+        centroids.push([...bestSample]);
+      }
+
+      // クラスタリング反復で実際の写真の色へ収束させる
+      const iterations = 6;
+      for (let iter = 0; iter < iterations; iter++) {
+        const sums = Array.from({ length: numColors }, () => [0, 0, 0, 0]);
+        for (let i = 0; i < samples.length; i++) {
+          const p = samples[i];
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          for (let c = 0; c < numColors; c++) {
+            const d = (p[0] - centroids[c][0]) ** 2 +
+                      (p[1] - centroids[c][1]) ** 2 +
+                      (p[2] - centroids[c][2]) ** 2;
+            if (d < bestDist) {
+              bestDist = d;
+              bestIdx = c;
+            }
+          }
+          sums[bestIdx][0] += p[0];
+          sums[bestIdx][1] += p[1];
+          sums[bestIdx][2] += p[2];
+          sums[bestIdx][3] += 1;
+        }
+        for (let c = 0; c < numColors; c++) {
+          if (sums[c][3] > 0) {
+            centroids[c][0] = Math.round(sums[c][0] / sums[c][3]);
+            centroids[c][1] = Math.round(sums[c][1] / sums[c][3]);
+            centroids[c][2] = Math.round(sums[c][2] / sums[c][3]);
+          }
+        }
+      }
+
+      return centroids.map(c => ({ r: c[0], g: c[1], b: c[2], a: 255 }));
+    }
+
+    function runAutoTrace() {
+      if (!hasUnderlay || typeof ImageTracer === 'undefined') return;
+
+      const loading = document.getElementById('loading-overlay');
+      loading.classList.remove('hidden');
+
+      setTimeout(() => {
+        try {
+          const mode = document.getElementById('trace-mode').value;
+          const speckle = parseInt(document.getElementById('trace-speckle').value, 10);
+
+          // 解析用の一時Canvas（常に劣化のないoriginalUnderlayCanvasから取得）
+          const procCanvas = document.createElement('canvas');
+          procCanvas.width = 800;
+          procCanvas.height = 600;
+          const pCtx = procCanvas.getContext('2d');
+          pCtx.drawImage(originalUnderlayCanvas, 0, 0);
+
+          const imgData = pCtx.getImageData(0, 0, 800, 600);
+          const removeBg = document.getElementById('trace-remove-bg').checked;
+
+          // 外周ピクセルの代表的な背景色を取得（カラーモードでの背景除外用）
+          let borderColors = [];
+          if (mode === 'color' && removeBg) {
+            const d = imgData.data;
+            const sampleCoords = [[4, 4], [795, 4], [4, 595], [795, 595], [400, 4], [400, 595]];
+            sampleCoords.forEach(([sx, sy]) => {
+              const idx = (sy * 800 + sx) * 4;
+              if (d[idx + 3] > 30) {
+                borderColors.push([d[idx], d[idx + 1], d[idx + 2]]);
+              }
+            });
+          }
+
+          // 白黒モード時はしきい値でくっきり二値化する。
+          // 重要: 透明ピクセルのRGBは(0,0,0)になっているため、そのままImageTracerに渡すと
+          // キャンバスの透明な余白がすべて「黒（線）」としてベタ塗りトレースされてしまう！
+          // そのため背景領域は必ず不透明な白 (255,255,255,255) に統一してからトレースにかける。
+          if (mode === 'bw') {
+            const threshold = parseInt(document.getElementById('trace-threshold').value, 10);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i + 3] < 40) {
+                // 透明な余白は「白（背景）」として塗りつぶすことで、背景の黒ベタ化を完全に防ぐ
+                data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
+                continue;
+              }
+              const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+              if (lum < threshold) {
+                data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255;
+              } else {
+                data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
+              }
+            }
+          } else {
+            // カラーモードでも透明な余白が黒(0,0,0)に化けないよう白で埋める
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i + 3] < 30) {
+                data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
+              }
+            }
+          }
+
+          const numColors = (mode === 'bw') ? 2 : parseInt(document.getElementById('trace-colors').value, 10);
+
+          const options = {
+            ltres: 1,
+            qtres: 1,
+            pathomit: speckle * 3,
+            colorsampling: 0,
+            numberofcolors: numColors,
+            mincolorratio: 0,
+            colorquantcycles: (mode === 'bw') ? 1 : 3,
+            scale: 1,
+            roundcoords: 1
+          };
+
+          if (mode === 'bw') {
+            // 白黒2色パレットを明示指定（黒＝線、白＝背景）
+            options.pal = [
+              { r: 0, g: 0, b: 0, a: 255 },
+              { r: 255, g: 255, b: 255, a: 255 }
+            ];
+          } else if (mode === 'color') {
+            const customPal = extractAccuratePaletteFromImage(imgData, numColors);
+            if (customPal) {
+              options.pal = customPal;
+              options.colorsampling = 0;
+              options.colorquantcycles = 2;
+            }
+          }
+
+          const svgStr = ImageTracer.imagedataToSVG(imgData, options);
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(svgStr, 'image/svg+xml');
+          const tracedPaths = doc.querySelectorAll('path');
+
+          let addedCount = 0;
+          tracedPaths.forEach(p => {
+            const fill = p.getAttribute('fill') || '';
+            const opacity = parseFloat(p.getAttribute('opacity') || '1');
+            if (opacity < 0.1) return;
+            const dAttr = p.getAttribute('d') || '';
+
+            // 白黒モード時は白色パス（背景）を確実に除外
+            if (mode === 'bw' && isNearWhite(fill)) return;
+
+            // 「背景のベタ塗りを自動で除外」がONの場合、キャンバスの四隅・外周に張り付いている巨大背景パスを除外
+            if (removeBg) {
+              const touchesTopLeft = /M\s*0(\.0)?[\s,]+0(\.0)?\b/.test(dAttr);
+              const touchesRightOrBottom = /\b(799|800)(\.0)?\b/.test(dAttr) || /\b(599|600)(\.0)?\b/.test(dAttr);
+              if (touchesTopLeft && touchesRightOrBottom) return;
+
+              if (mode === 'color' && touchesTopLeft && borderColors.length > 0) {
+                const m = fill.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+                if (m) {
+                  const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10);
+                  const isBorderBg = borderColors.some(([br, bg, bb]) => Math.hypot(r - br, g - bg, b - bb) < 35);
+                  if (isBorderBg) return;
+                }
+              }
+            }
+
+            const cleanPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            cleanPath.setAttribute('d', dAttr);
+            const finalFill = (mode === 'bw') ? currentColor : rgbToHexIfNeeded(fill);
+            cleanPath.setAttribute('fill', finalFill);
+            // 色面の隙間に白い筋が出ないよう同色の細いストロークを付与
+            if (mode === 'color') {
+              cleanPath.setAttribute('stroke', finalFill);
+              cleanPath.setAttribute('stroke-width', '0.6');
+            } else {
+              cleanPath.setAttribute('stroke', 'none');
+            }
+            mainGroup.appendChild(cleanPath);
+            addedCount++;
+          });
+
+          saveHistory();
+          showToast(`自動トレース完了！ (${addedCount} 個のパスを生成)`);
+        } catch (err) {
+          console.error(err);
+          showToast('自動トレース中にエラーが発生しました');
+        } finally {
+          loading.classList.add('hidden');
+        }
+      }, 60);
+    }
+
+    function rgbToHexIfNeeded(colorStr) {
+      const m = colorStr.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+      if (m) {
+        const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10);
+        return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      }
+      return colorStr;
+    }
+
+    function isNearWhite(colorStr) {
+      const m = colorStr.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+      if (m) {
+        const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10);
+        return (r > 242 && g > 242 && b > 242);
+      }
+      return colorStr.toLowerCase() === '#ffffff' || colorStr.toLowerCase() === '#fff';
+    }
+
+    // --- 微小なゴミパスを一括削除 ---
+    function removeSmallPaths() {
+      const elements = Array.from(mainGroup.children);
+      let removed = 0;
+      elements.forEach(p => {
+        try {
+          const bbox = p.getBBox();
+          if (bbox.width < 6 && bbox.height < 6) {
+            p.remove();
+            removed++;
+          }
+        } catch (e) {}
+      });
+      if (removed > 0) {
+        saveHistory();
+        showToast(`${removed} 個の微小パスを削除しました`);
+      } else {
+        showToast('削除対象の微小パスはありませんでした');
+      }
+    }
+
+    // --- 選択したパス（または全パス）を任意の均一の太さに補正 ---
+    // 塗りつぶしで作られた太さムラのあるパス（自動トレース結果など）も、
+    // 骨格（中心線）を抽出して1本の純粋なセンターラインPathに変換し、完全に均一な太さにする
+    function applyUniformStrokeWidth() {
+      const targetWidth = parseFloat(document.getElementById('uniform-width-input').value);
+      if (isNaN(targetWidth) || targetWidth <= 0) {
+        showToast('有効な太さ(px)を入力してください');
+        return;
+      }
+
+      const activeSel = selectedElements.filter(el => el && el.parentElement === mainGroup);
+      const targets = (activeSel.length > 0)
+        ? activeSel
+        : Array.from(mainGroup.children);
+
+      if (targets.length === 0) {
+        showToast('補正対象のパスがありません');
+        return;
+      }
+
+      let count = 0;
+      targets.forEach(el => {
+        const fl = el.getAttribute('fill');
+        const st = el.getAttribute('stroke');
+        const sw = parseFloat(el.getAttribute('stroke-width') || '0');
+
+        // 自動トレース等で生成された「塗り（fill）で表現された太さムラのある線」かどうかを判定
+        const isFilledShapePath = (el.tagName === 'path') && (fl && fl !== 'none') && (!st || st === 'none' || sw <= 1.5);
+
+        if (isFilledShapePath) {
+          const strokeColor = fl || currentColor;
+          const centerD = extractCenterlineFromFilledPath(el);
+          if (centerD) {
+            el.setAttribute('d', centerD);
+            el.setAttribute('fill', 'none');
+            el.setAttribute('stroke', strokeColor);
+            el.setAttribute('stroke-width', targetWidth);
+            el.setAttribute('stroke-linecap', 'round');
+            el.setAttribute('stroke-linejoin', 'round');
+            count++;
+            return;
+          }
+        }
+
+        // 通常のストローク要素または図形要素の場合
+        if (!st || st === 'none') {
+          el.setAttribute('stroke', (fl && fl !== 'none') ? fl : currentColor);
+        }
+        // パスが塗りで太くなっていた場合は塗りを消して純粋な均一線にする
+        if (el.tagName === 'path' && fl && fl !== 'none' && currentTool !== 'fillpen') {
+          el.setAttribute('fill', 'none');
+        }
+        el.setAttribute('stroke-width', targetWidth);
+        el.setAttribute('stroke-linecap', 'round');
+        el.setAttribute('stroke-linejoin', 'round');
+        count++;
+      });
+
+      currentWidth = targetWidth;
+      document.getElementById('stroke-width').value = Math.min(40, targetWidth);
+      document.getElementById('stroke-width-val').textContent = targetWidth;
+
+      saveHistory();
+      if (selectedElement) {
+        showToast(`選択したパスを中心線化して完全に均一な太さ (${targetWidth}px) に補正しました`);
+      } else {
+        showToast(`すべてのパス(${count}個)を完全に均一な太さ (${targetWidth}px) に補正しました`);
+      }
+    }
+
+    // 塗りつぶしパス（輪郭パス）をオフスクリーンCanvasに描画し、
+    // Zhang-Suenの細線化（スケルトン抽出）で1pxの中心線を求めて単一ストロークのSVGパス(d)へ変換する
+    function extractCenterlineFromFilledPath(pathEl) {
+      try {
+        const bbox = pathEl.getBBox();
+        if (bbox.width < 2 && bbox.height < 2) return null;
+
+        const pad = 8;
+        const x0 = Math.max(0, Math.floor(bbox.x - pad));
+        const y0 = Math.max(0, Math.floor(bbox.y - pad));
+        const w = Math.min(800 - x0, Math.ceil(bbox.width + pad * 2));
+        const h = Math.min(600 - y0, Math.ceil(bbox.height + pad * 2));
+        if (w <= 2 || h <= 2) return null;
+
+        const cvs = document.createElement('canvas');
+        cvs.width = w;
+        cvs.height = h;
+        const ctx = cvs.getContext('2d', { willReadFrequently: true });
+
+        ctx.save();
+        ctx.translate(-x0, -y0);
+        // 要素にtransform(translate)が付いている場合はそれも考慮しない（d自体のローカル座標系で抽出）
+        const p2d = new Path2D(pathEl.getAttribute('d'));
+        ctx.fillStyle = '#000000';
+        ctx.fill(p2d);
+        ctx.restore();
+
+        const imgData = ctx.getImageData(0, 0, w, h).data;
+        const grid = new Uint8Array(w * h);
+        for (let i = 0; i < w * h; i++) {
+          grid[i] = imgData[i * 4 + 3] > 120 ? 1 : 0;
+        }
+
+        // Zhang-Suen Thinning アルゴリズムで1ピクセル幅の骨格（中心線）に細線化
+        thinBinaryGridZhangSuen(grid, w, h);
+
+        // 細線化された1pxグリッドから連続する座標点列（ポリライン群）をトレース
+        const chains = traceSkeletonChains(grid, w, h, x0, y0);
+        if (chains.length === 0) return null;
+
+        let fullD = '';
+        chains.forEach(pts => {
+          if (pts.length < 2) return;
+          // 細線化特有の1px階段ジャギーを移動平均で完全に滑らかにする
+          let smoothed = pts;
+          const isLoop = Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 5 && pts.length > 8;
+          const passes = 6;
+          for (let iter = 0; iter < passes; iter++) {
+            const next = [];
+            if (isLoop) {
+              const len = smoothed.length;
+              for (let i = 0; i < len; i++) {
+                const prev = smoothed[(i - 1 + len) % len];
+                const curr = smoothed[i];
+                const nxt = smoothed[(i + 1) % len];
+                next.push({ x: (prev.x + curr.x + nxt.x) / 3, y: (prev.y + curr.y + nxt.y) / 3 });
+              }
+            } else {
+              next.push(smoothed[0]);
+              for (let i = 1; i < smoothed.length - 1; i++) {
+                next.push({
+                  x: (smoothed[i - 1].x + smoothed[i].x + smoothed[i + 1].x) / 3,
+                  y: (smoothed[i - 1].y + smoothed[i].y + smoothed[i + 1].y) / 3
+                });
+              }
+              next.push(smoothed[smoothed.length - 1]);
+            }
+            smoothed = next;
+          }
+
+          const simplified = simplifyPointsRDP(smoothed, 1.2);
+          if ( isLoop && simplified.length > 2 ) {
+            simplified.push({ x: simplified[0].x, y: simplified[0].y });
+          }
+          const subD = buildSmoothSVGPath(simplified, isLoop);
+          if (subD) fullD += (fullD ? ' ' : '') + subD;
+        });
+
+        return fullD || null;
+      } catch (e) {
+        console.error('Centerline extraction failed:', e);
+        return null;
+      }
+    }
+
+    // Zhang-Suen の細線化アルゴリズム
+    function thinBinaryGridZhangSuen(grid, w, h) {
+      const toClear = new Int32Array(w * h);
+      let changed = true;
+      let maxIter = 150;
+
+      while (changed && maxIter-- > 0) {
+        changed = false;
+        for (let step = 0; step < 2; step++) {
+          let clearCount = 0;
+          for (let y = 1; y < h - 1; y++) {
+            const row = y * w;
+            for (let x = 1; x < w - 1; x++) {
+              const idx = row + x;
+              if (grid[idx] === 0) continue;
+
+              const p2 = grid[idx - w];
+              const p3 = grid[idx - w + 1];
+              const p4 = grid[idx + 1];
+              const p5 = grid[idx + w + 1];
+              const p6 = grid[idx + w];
+              const p7 = grid[idx + w - 1];
+              const p8 = grid[idx - 1];
+              const p9 = grid[idx - w - 1];
+
+              const B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+              if (B < 2 || B > 6) continue;
+
+              let A = 0;
+              if (p2 === 0 && p3 === 1) A++;
+              if (p3 === 0 && p4 === 1) A++;
+              if (p4 === 0 && p5 === 1) A++;
+              if (p5 === 0 && p6 === 1) A++;
+              if (p6 === 0 && p7 === 1) A++;
+              if (p7 === 0 && p8 === 1) A++;
+              if (p8 === 0 && p9 === 1) A++;
+              if (p9 === 0 && p2 === 1) A++;
+              if (A !== 1) continue;
+
+              if (step === 0) {
+                if (p2 * p4 * p6 !== 0) continue;
+                if (p4 * p6 * p8 !== 0) continue;
+              } else {
+                if (p2 * p4 * p8 !== 0) continue;
+                if (p2 * p6 * p8 !== 0) continue;
+              }
+
+              toClear[clearCount++] = idx;
+            }
+          }
+          if (clearCount > 0) {
+            changed = true;
+            for (let i = 0; i < clearCount; i++) {
+              grid[toClear[i]] = 0;
+            }
+          }
+        }
+      }
+    }
+
+    // 細線化されたピクセルから連続したストローク座標列を取り出す
+    function traceSkeletonChains(grid, w, h, offsetX, offsetY) {
+      const visited = new Uint8Array(w * h);
+      const chains = [];
+      const dirs = [
+        [0, -1], [1, 0], [0, 1], [-1, 0],
+        [1, -1], [1, 1], [-1, 1], [-1, -1]
+      ];
+
+      function countNeighbors(x, y) {
+        let c = 0;
+        for (let d = 0; d < 8; d++) {
+          const nx = x + dirs[d][0], ny = y + dirs[d][1];
+          if (nx >= 0 && nx < w && ny >= 0 && ny < h && grid[ny * w + nx]) c++;
+        }
+        return c;
+      }
+
+      // まず端点（隣接数が1のピクセル）から優先的にトレースを開始し、次にループ（隣接数2以上）を拾う
+      for (let pass = 0; pass < 2; pass++) {
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const idx = y * w + x;
+            if (!grid[idx] || visited[idx]) continue;
+            const nc = countNeighbors(x, y);
+            if (pass === 0 && nc !== 1) continue;
+
+            const chain = [];
+            let cx = x, cy = y;
+            while (true) {
+              visited[cy * w + cx] = 1;
+              chain.push({ x: cx + offsetX, y: cy + offsetY });
+              let foundNext = false;
+              for (let d = 0; d < 8; d++) {
+                const nx = cx + dirs[d][0], ny = cy + dirs[d][1];
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                  const nIdx = ny * w + nx;
+                  if (grid[nIdx] && !visited[nIdx]) {
+                    cx = nx;
+                    cy = ny;
+                    foundNext = true;
+                    break;
+                  }
+                }
+              }
+              if (!foundNext) break;
+            }
+            if (chain.length >= 3) {
+              chains.push(chain);
+            }
+          }
+        }
+      }
+      return chains;
+    }
+
+    // --- パスの一括滑らか補正（選択パス優先対応） ---
+    function smoothAllPaths() {
+      const activeSelPaths = selectedElements.filter(el => el && el.parentElement === mainGroup && el.tagName === 'path');
+      const paths = (activeSelPaths.length > 0)
+        ? activeSelPaths
+        : mainGroup.querySelectorAll('path');
+      let updated = 0;
+      paths.forEach(p => {
+        const d = p.getAttribute('d');
+        if (!d) return;
+        // すべての数値を抽出 (正規表現で座標をペアにする)
+        const numMatches = d.match(/[+-]?\d*\.?\d+(?:[eE][+-]?\d+)?/g);
+        if (!numMatches || numMatches.length < 4) return;
+        
+        let pts = [];
+        for (let i = 0; i < numMatches.length; i += 2) {
+          if (numMatches[i+1] !== undefined) {
+            pts.push({ x: parseFloat(numMatches[i]), y: parseFloat(numMatches[i+1]) });
+          }
+        }
+        
+        // 移動平均とRDPで滑らかなパスを再構築
+        if (pts.length > 3) {
+          const isClosed = /z/i.test(d);
+          const passes = Math.max(2, Math.ceil(simplifyTolerance * 2));
+          let smoothedPts = pts;
+          for (let iter = 0; iter < passes; iter++) {
+            const next = [smoothedPts[0]];
+            for (let i = 1; i < smoothedPts.length - 1; i++) {
+              next.push({
+                x: (smoothedPts[i - 1].x + smoothedPts[i].x + smoothedPts[i + 1].x) / 3,
+                y: (smoothedPts[i - 1].y + smoothedPts[i].y + smoothedPts[i + 1].y) / 3
+              });
+            }
+            next.push(smoothedPts[smoothedPts.length - 1]);
+            smoothedPts = next;
+          }
+          const simplified = simplifyPointsRDP(smoothedPts, Math.max(0.5, simplifyTolerance * 0.4));
+          const newD = buildSmoothSVGPath(simplified, isClosed);
+          if (newD) {
+            p.setAttribute('d', newD);
+            updated++;
+          }
+        }
+      });
+
+      if (updated > 0) {
+        saveHistory();
+        showToast(`${updated} 個のパスを滑らかに補正しました`);
+      } else {
+        showToast('補正できるパスがありませんでした');
+      }
+    }
+
+    // --- Undo / Redo 履歴管理（下絵Canvasは一切消さずにベクター要素のみを復元） ---
+    function saveHistory() {
+      // 選択ハイライト用のクラスが履歴に混ざらないよう一時除去してスナップショット取得
+      selectedElements.forEach(el => el.classList.remove('selected-element'));
+      if (editingPathElement) editingPathElement.classList.remove('selected-element');
+
+      const snapshot = {
+        main: mainGroup.innerHTML,
+        eraser: eraserStrokesGroup.innerHTML
+      };
+
+      selectedElements.forEach(el => el.classList.add('selected-element'));
+      if (editingPathElement) editingPathElement.classList.add('selected-element');
+
+      if (historyIndex >= 0) {
+        if (historyStack[historyIndex].main === snapshot.main && 
+            historyStack[historyIndex].eraser === snapshot.eraser) return;
+      }
+      historyStack = historyStack.slice(0, historyIndex + 1);
+      historyStack.push(snapshot);
+      if (historyStack.length > 40) historyStack.shift();
+      else historyIndex++;
+      updateHistoryButtons();
+      updatePathCount();
+    }
+
+    function undo() {
+      if (historyIndex > 0) {
+        clearElementSelection();
+        historyIndex--;
+        mainGroup.innerHTML = historyStack[historyIndex].main;
+        eraserStrokesGroup.innerHTML = historyStack[historyIndex].eraser;
+        // 下絵が存在する場合は表示状態を確実に維持する
+        if (hasUnderlay && isUnderlayVisible) {
+          underlayCanvas.classList.remove('hidden');
+        }
+        updateHistoryButtons();
+        updatePathCount();
+      }
+    }
+
+    function redo() {
+      if (historyIndex < historyStack.length - 1) {
+        clearElementSelection();
+        historyIndex++;
+        mainGroup.innerHTML = historyStack[historyIndex].main;
+        eraserStrokesGroup.innerHTML = historyStack[historyIndex].eraser;
+        if (hasUnderlay && isUnderlayVisible) {
+          underlayCanvas.classList.remove('hidden');
+        }
+        updateHistoryButtons();
+        updatePathCount();
+      }
+    }
+
+    function updateHistoryButtons() {
+      document.getElementById('btn-undo').disabled = (historyIndex <= 0);
+      document.getElementById('btn-redo').disabled = (historyIndex >= historyStack.length - 1);
+    }
+
+    function updatePathCount() {
+      const count = mainGroup.children.length;
+      document.getElementById('path-count-badge').textContent = `${count} 個`;
+    }
+
+    function confirmClearAll() {
+      if (mainGroup.children.length === 0) return;
+      const modal = document.getElementById('confirm-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeConfirmModal() {
+      const modal = document.getElementById('confirm-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function executeClearAll() {
+      mainGroup.innerHTML = '';
+      eraserStrokesGroup.innerHTML = '';
+      saveHistory();
+      closeConfirmModal();
+      showToast('キャンバスをすべて消去しました');
+    }
+
+    // --- 空間の塗りつぶし機能 ---
+    async function executeBucketFill(pt) {
+      if (typeof ImageTracer === 'undefined') return;
+      const loading = document.getElementById('loading-overlay');
+      loading.classList.remove('hidden');
+      await new Promise(r => setTimeout(r, 20)); // UI更新待ち
+
+      try {
+        const svgData = new XMLSerializer().serializeToString(svgEl);
+        const blob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+
+        const cvs = document.createElement('canvas');
+        cvs.width = 800; cvs.height = 600;
+        const ctx = cvs.getContext('2d', {willReadFrequently: true});
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0,0,800,600);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+
+        const imgData = ctx.getImageData(0,0,800,600);
+        const data = imgData.data;
+        const startX = Math.floor(pt.x), startY = Math.floor(pt.y);
+        
+        if (startX < 0 || startX >= 800 || startY < 0 || startY >= 600) {
+          loading.classList.add('hidden');
+          return;
+        }
+        
+        const startIdx = (startY * 800 + startX) * 4;
+        const tR = data[startIdx], tG = data[startIdx+1], tB = data[startIdx+2];
+
+        if (tR < 50 && tG < 50 && tB < 50) { // 線の真上なら無視
+          loading.classList.add('hidden');
+          return;
+        }
+
+        const maskData = new ImageData(800, 600);
+        const mData = maskData.data;
+        for(let i=0; i<mData.length; i+=4){
+          mData[i]=255; mData[i+1]=255; mData[i+2]=255; mData[i+3]=255;
+        }
+
+        const queue = new Int32Array(800 * 600 * 2);
+        let head = 0, tail = 0;
+        queue[tail++] = startX;
+        queue[tail++] = startY;
+
+        const visited = new Uint8Array(800 * 600);
+        visited[startY * 800 + startX] = 1;
+
+        const tol = 60;
+        
+        while(head < tail) {
+          const cx = queue[head++];
+          const cy = queue[head++];
+          const idx = (cy * 800 + cx) * 4;
+          
+          mData[idx] = 0; mData[idx+1] = 0; mData[idx+2] = 0; mData[idx+3] = 255;
+          
+          if (cx > 0 && !visited[cy * 800 + cx - 1]) {
+            const nIdx = idx - 4;
+            if (Math.abs(data[nIdx]-tR)<tol && Math.abs(data[nIdx+1]-tG)<tol && Math.abs(data[nIdx+2]-tB)<tol) {
+              visited[cy * 800 + cx - 1] = 1; queue[tail++] = cx - 1; queue[tail++] = cy;
+            }
+          }
+          if (cx < 799 && !visited[cy * 800 + cx + 1]) {
+            const nIdx = idx + 4;
+            if (Math.abs(data[nIdx]-tR)<tol && Math.abs(data[nIdx+1]-tG)<tol && Math.abs(data[nIdx+2]-tB)<tol) {
+              visited[cy * 800 + cx + 1] = 1; queue[tail++] = cx + 1; queue[tail++] = cy;
+            }
+          }
+          if (cy > 0 && !visited[(cy - 1) * 800 + cx]) {
+            const nIdx = idx - 3200; // 800 * 4
+            if (Math.abs(data[nIdx]-tR)<tol && Math.abs(data[nIdx+1]-tG)<tol && Math.abs(data[nIdx+2]-tB)<tol) {
+              visited[(cy - 1) * 800 + cx] = 1; queue[tail++] = cx; queue[tail++] = cy - 1;
+            }
+          }
+          if (cy < 599 && !visited[(cy + 1) * 800 + cx]) {
+            const nIdx = idx + 3200;
+            if (Math.abs(data[nIdx]-tR)<tol && Math.abs(data[nIdx+1]-tG)<tol && Math.abs(data[nIdx+2]-tB)<tol) {
+              visited[(cy + 1) * 800 + cx] = 1; queue[tail++] = cx; queue[tail++] = cy + 1;
+            }
+          }
+        }
+        
+        const svgStr = ImageTracer.imagedataToSVG(maskData, {
+          ltres: 1, qtres: 1, pathomit: 8, colorsampling: 0, numberofcolors: 2, scale: 1, roundcoords: 1
+        });
+        
+        const doc = new DOMParser().parseFromString(svgStr, 'image/svg+xml');
+        let added = false;
+        doc.querySelectorAll('path').forEach(p => {
+          const fill = p.getAttribute('fill');
+          if (fill === 'rgb(0,0,0)' || fill === '#000000') {
+            const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            newPath.setAttribute('d', p.getAttribute('d'));
+            newPath.setAttribute('fill', currentColor);
+            // 塗りつぶしの隙間を防ぐため同色のストロークを少し追加
+            newPath.setAttribute('stroke', currentColor);
+            newPath.setAttribute('stroke-width', '1.5');
+            // 線の下に色を敷くために先頭に挿入
+            mainGroup.insertBefore(newPath, mainGroup.firstChild);
+            added = true;
+          }
+        });
+        
+        if (added) {
+          saveHistory();
+          showToast('塗りつぶしました');
+        } else {
+          showToast('塗りつぶし領域が見つかりませんでした');
+        }
+      } catch(err) {
+        console.error(err);
+        showToast('塗りつぶし中にエラーが発生しました');
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
+    // =========================================================================
+    // VIBridge 連携用：手動/自動トリミング＆SVGコード・Data URI 生成エンジン
+    // =========================================================================
+    function generateOptimizedSVGData() {
+      const trimMode = document.getElementById('opt-trim-mode').value;
+      const useCurrentColor = document.getElementById('opt-currentcolor').checked;
+      const addWhiteBg = document.getElementById('opt-whitebg').checked;
+      const pad = parseInt(document.getElementById('opt-padding').value, 10) || 0;
+
+      // トリミングモードに応じて viewBox (vx, vy, vw, vh) を決定
+      let vx = 0, vy = 0, vw = 800, vh = 600;
+      if (trimMode === 'manual') {
+        vx = Math.round(cropRect.x);
+        vy = Math.round(cropRect.y);
+        vw = Math.max(1, Math.round(cropRect.w));
+        vh = Math.max(1, Math.round(cropRect.h));
+      } else if (trimMode === 'auto' && mainGroup.children.length > 0) {
+        try {
+          const bbox = mainGroup.getBBox();
+          if (bbox.width > 0 && bbox.height > 0) {
+            if (isFinite(bbox.x) && isFinite(bbox.width)) {
+              vx = Math.floor(bbox.x - pad);
+              vy = Math.floor(bbox.y - pad);
+              vw = Math.ceil(bbox.width + pad * 2);
+              vh = Math.ceil(bbox.height + pad * 2);
+            }
+          }
+        } catch (e) {}
+      }
+
+      // クローンを作成して整形（選択ハイライト用クラスは除去）
+      const clonedGroup = mainGroup.cloneNode(true);
+      clonedGroup.querySelectorAll('.selected-element').forEach(el => el.classList.remove('selected-element'));
+
+      if (useCurrentColor) {
+        clonedGroup.querySelectorAll('*').forEach(p => {
+          const f = p.getAttribute('fill');
+          const s = p.getAttribute('stroke');
+          if (f && f !== 'none') p.setAttribute('fill', 'currentColor');
+          if (s && s !== 'none') p.setAttribute('stroke', 'currentColor');
+        });
+      }
+      
+      // 部分消しゴムのマスク定義が含まれているか確認
+      let maskDefs = '';
+      if (eraserStrokesGroup.children.length > 0) {
+        maskDefs = `<defs><mask id="partial-eraser-mask-export"><rect x="${vx - 1000}" y="${vy - 1000}" width="${vw + 2000}" height="${vh + 2000}" fill="white"/><g stroke="black" fill="none" stroke-linecap="round" stroke-linejoin="round">${eraserStrokesGroup.innerHTML}</g></mask></defs>`;
+        clonedGroup.setAttribute('mask', 'url(#partial-eraser-mask-export)');
+      } else {
+        clonedGroup.removeAttribute('mask');
+      }
+
+      const bgRect = addWhiteBg
+        ? `<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#ffffff"/>`
+        : '';
+
+      const innerContent = maskDefs + bgRect + clonedGroup.outerHTML.replace(/\s+/g, ' ').trim();
+
+      // ① インライン埋め込み用 <svg>（固定width/heightを持たず親要素に100%フィット）
+      const inlineSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" style="width:100%;height:100%;display:block;" stroke-linecap="round" stroke-linejoin="round">${innerContent}</svg>`;
+
+      // ② <img src="..."> 用 Data URI（UTF-8 URLエンコード形式）
+      const encodedSVG = inlineSVG
+        .replace(/"/g, "'")
+        .replace(/%/g, '%25')
+        .replace(/#/g, '%23')
+        .replace(/{/g, '%7B')
+        .replace(/}/g, '%7D')
+        .replace(/</g, '%3C')
+        .replace(/>/g, '%3E');
+      const dataURI = `data:image/svg+xml;utf8,${encodedSVG}`;
+
+      return { inlineSVG, dataURI, viewBox: `${vx} ${vy} ${vw} ${vh}` };
+    }
+
+    // クリップボードへコピー（iFrame制限環境でも確実に動作するフォールバック付き）
+    function copyTextToClipboard(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        if (navigator.clipboard) navigator.clipboard.writeText(text);
+      }
+      document.body.removeChild(textarea);
+    }
+
+    function copyForVIBridge(type) {
+      if (mainGroup.children.length === 0) {
+        showToast('まだイラストが描かれていません');
+        return;
+      }
+
+      const { inlineSVG, dataURI } = generateOptimizedSVGData();
+      const targetText = (type === 'inline') ? inlineSVG : dataURI;
+
+      copyTextToClipboard(targetText);
+
+      // BroadcastChannel経由でもVIBridgeへ同時送信
+      if (vibridgeChannel) {
+        vibridgeChannel.postMessage({
+          type: 'VIBRIDGE_SVG_EXPORT',
+          format: type,
+          svg: inlineSVG,
+          dataUri: dataURI
+        });
+      }
+
+      if (type === 'inline') {
+        showToast('① HTML埋め込み用 <svg> コードをコピーしました！');
+      } else {
+        showToast('② <img src> 用 Data URI をコピーしました！');
+      }
+    }
+
+    // プレビュー確認モーダル
+    function openPreviewModal() {
+      if (mainGroup.children.length === 0) {
+        showToast('まだイラストが描かれていません');
+        return;
+      }
+      const { inlineSVG, dataURI } = generateOptimizedSVGData();
+      document.getElementById('modal-code-inline').value = inlineSVG;
+      document.getElementById('modal-code-datauri').value = dataURI;
+
+      const previewBox = document.getElementById('modal-svg-preview');
+      previewBox.innerHTML = inlineSVG;
+      const svgInModal = previewBox.querySelector('svg');
+      if (svgInModal) {
+        svgInModal.style.width = '180px';
+        svgInModal.style.height = '180px';
+      }
+
+      const modal = document.getElementById('preview-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closePreviewModal() {
+      const modal = document.getElementById('preview-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    // .svg ファイルとして端末に保存
+    function downloadSVGFile() {
+      if (mainGroup.children.length === 0) {
+        showToast('まだイラストが描かれていません');
+        return;
+      }
+      const { inlineSVG } = generateOptimizedSVGData();
+      const blob = new Blob([inlineSVG], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vibridge-illust-${Date.now().toString().slice(-5)}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('SVGファイルを保存しました');
+    }
+
+    // トースト通知表示
+    let toastTimer = null;
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-msg').textContent = message;
+      toast.classList.remove('translate-y-10', 'opacity-0');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.add('translate-y-10', 'opacity-0');
+      }, 2800);
+    }
+
+    // 初期状態更新
+    saveHistory(); // 初期状態を保存
+    updateHistoryButtons();
+    updatePathCount();
+    updateClipboardButtons();
+  </script>
+</body>
+</html>
